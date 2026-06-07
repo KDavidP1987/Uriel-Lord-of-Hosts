@@ -15,7 +15,7 @@ fixes, each individually toggleable by server admins.
 |---|---|---|
 | **Public storage** — per-container opt-in: mark a specific chest publicly accessible, with optional permissions (take/give), per-player withdrawal limits, and per-stack access costs paid to the owner | Implemented (experimental; open+take validated live, policies pending validation) | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
 | **Public prison cells** — separately mark a prison cell publicly accessible (feed/extract/charm-out) | Implemented (experimental, pending live validation) | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
-| **Stair hot-swap** — swap placed stairs to another stair type without demolishing | Researched | [docs/features/STAIR_HOTSWAP.md](docs/features/STAIR_HOTSWAP.md) |
+| **Stair hot-swap** — restyle placed stairs in place (same-shape cosmetics only, DLC styles gated by ownership) | Implemented (experimental, pending live validation) | [docs/features/STAIR_HOTSWAP.md](docs/features/STAIR_HOTSWAP.md) |
 
 Every feature ships behind its own config switch — Uriel is never
 all-or-nothing.

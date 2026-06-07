@@ -8,6 +8,35 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.7.0] - 2026-06-07
+
+### Added — stair hot-swap (experimental, first implementation)
+- **`.uriel stairswap <style>`** — aim at a placed staircase and swap it to
+  another cosmetic of the SAME shape, in place, free (same-archetype
+  cosmetics cost identically in vanilla). Styles: `stone1|stone2|stone3|
+  gloomrot|projectk|strongblade`, or `next` to cycle to the next style you
+  own. Position, rotation, tile data, and castle ownership are preserved
+  exactly.
+- **`.uriel stairstyles`** — show the aimed stair's shape, current style,
+  and which styles are available to you (DLC-locked styles are marked).
+- **Archetype matching enforced**: narrow straight (`Single`), narrow
+  right-curve (`Single_CW`), narrow left-curve (`Single_CCW`), and wide
+  (`Double`) stairs only swap within their own shape — all 24 blueprint
+  GUIDs mapped from the prefab dump.
+- **DLC entitlement (owner decision)**: a player may only swap TO a style
+  present in their own build menu — DLC cosmetics carry
+  `ProgressionUserContentDependency`, checked against the player's
+  `User.UserContent` flags via `UserContentUtility.HasUnlocked`. No
+  server-wide bypass.
+- Mechanism: KindredSchematics-pattern manual surgery — instantiate the
+  target blueprint, copy `Translation`/`Rotation`/`TilePosition`/
+  `TileBounds`/`StaticTransformCompatible`, wire `Team`/`TeamReference`/
+  `UserOwner`/`CastleHeartConnection` from the castle heart, then
+  `DestroyUtility` the old root only (never attach-parents). The game
+  self-registers the new tile.
+- New config: `StairSwap.MaxTargetDistance` (default 6m);
+  `StairSwap.Enabled` now actually gates the feature.
+
 ## [0.6.0] - 2026-06-07
 
 ### Added — bulk visibility & control

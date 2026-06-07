@@ -25,10 +25,12 @@ sharing.
 - *Access cost*: charge an item per stack withdrawn — payment is delivered to
   your designated private pay chest. A vending machine, basically.
 
-### Stair hot-swap *(coming soon)*
-Swap placed stairs to another stair type straight from the build menu — no
-more demolishing a staircase just to change its style, the way other tiles
-already swap.
+### Stair hot-swap *(experimental — testing welcome!)*
+Aim at a placed staircase and swap it to another style **in place** — no more
+demolishing just to restyle. Only styles of the same stair shape (narrow,
+narrow-curved left/right, wide) are offered, and DLC styles require owning
+that DLC — exactly the same rule as your build menu. Free, instant, preserves
+position/rotation/ownership.
 
 ## Commands
 
@@ -47,6 +49,9 @@ already swap.
 .uriel paychest                   → aim at a PRIVATE chest: receives payments
 .uriel finditem <name>            → search item ids for the cost command
 .uriel unsharemine                → revert ALL of your shares in one command
+.uriel stairswap <style|next>     → re-skin the aimed stair (stone1/2/3,
+                                    gloomrot, projectk, strongblade)
+.uriel stairstyles                → list styles available for the aimed stair
 .uriel sharedall [player]         → (admin) list all/one player's public containers
 .uriel unshareplayer <player>     → (admin) revert ALL of one player's shares
 .uriel unshareall                 → (admin) revert everything to private
@@ -69,7 +74,8 @@ Config changes take effect on server restart.
 | PublicStorage | Enabled | true | Allow per-chest public sharing |
 | PublicStorage | PrisonEnabled | true | Allow per-cell public prison sharing *(experimental)* |
 | PublicStorage | MaxTargetDistance | 5 | Aim distance for `.uriel share`/`unshare` targeting |
-| StairSwap | Enabled | true | Allow in-place stair swapping *(not yet implemented)* |
+| StairSwap | Enabled | true | Allow in-place stair restyling *(experimental)* |
+| StairSwap | MaxTargetDistance | 6 | Aim distance for the stair commands |
 
 ## Requirements
 

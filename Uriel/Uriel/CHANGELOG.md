@@ -3,6 +3,14 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.7.0 (2026-06-07)
+
+- STAIR HOT-SWAP (experimental): aim at a staircase and `.uriel stairswap
+  <style>` re-skins it in place — no demolishing. Only styles of the same
+  stair shape are offered, and DLC styles require owning that DLC (same rule
+  as your build menu). `.uriel stairstyles` lists what's available;
+  `.uriel stairswap next` cycles.
+
 ## 0.6.0 (2026-06-07)
 
 - `.uriel shared` now lists your public containers with their full rules;

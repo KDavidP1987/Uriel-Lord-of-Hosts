@@ -1,7 +1,14 @@
 # Feature: Stair Hot-Swap
 
-**Status:** RESEARCH COMPLETE (2026-06-07) — implementation plan ready, route chosen
-**Config:** `[StairSwap] Enabled` (default `true`); planned: `[StairSwap] AllowDlcStyles`
+**Status:** IMPLEMENTED v0.7.0 (2026-06-07) — pending live-server validation
+**Config:** `[StairSwap] Enabled` (default `true`), `[StairSwap] MaxTargetDistance` (default 6)
+**Code:** `Services/StairSwapService.cs`, `Commands/StairCommands.cs`
+
+**DLC decision (owner, 2026-06-07):** per-user entitlement — a player may only
+swap TO a style in their own build menu. Implemented via
+`prefab.ProgressionUserContentDependency.Value` checked against
+`User.UserContent` with `UserContentUtility.HasUnlocked` (no AllowDlcStyles
+server-wide override; the build-menu rule is the rule).
 
 ## Problem
 

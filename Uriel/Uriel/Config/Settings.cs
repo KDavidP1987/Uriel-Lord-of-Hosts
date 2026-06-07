@@ -11,6 +11,7 @@ internal static class Settings
 {
     // ---- Feature: stair hot-swap ----
     public static ConfigEntry<bool> StairSwap_Enabled { get; private set; }
+    public static ConfigEntry<float> StairSwap_MaxTargetDistance { get; private set; }
 
     // ---- Feature: public storage (per-container opt-in) ----
     public static ConfigEntry<bool> PublicStorage_Enabled { get; private set; }
@@ -24,8 +25,14 @@ internal static class Settings
     {
         StairSwap_Enabled = config.Bind(
             "StairSwap", "Enabled", true,
-            "Allow players to hot-swap placed stairs to another stair type from the build menu " +
-            "without demolishing them first (matches how other tile sets are already swappable).");
+            "Allow players to hot-swap placed stairs to another cosmetic style of the same shape " +
+            "via '.uriel stairswap' without demolishing them first. DLC styles require the player " +
+            "to own that DLC (same rule as the build menu).");
+
+        StairSwap_MaxTargetDistance = config.Bind(
+            "StairSwap", "MaxTargetDistance", 6f,
+            "How close (meters) your aim point must be to a stair for '.uriel stairswap'/'.uriel stairstyles' " +
+            "to target it.");
 
         PublicStorage_Enabled = config.Bind(
             "PublicStorage", "Enabled", true,
