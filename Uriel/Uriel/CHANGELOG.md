@@ -3,6 +3,13 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.13.0 (2026-06-07)
+
+- Stair swap reworked: the placed stair now simply BECOMES the other style —
+  nothing is demolished or rebuilt, no materials move, and the stair keeps
+  behaving exactly like the one you originally placed. If it still shows the
+  old look right after swapping, step away and back (or relog).
+
 ## 0.12.2 (2026-06-07)
 
 - Fix: stair swaps complete now — if the game's own dismantle doesn't finish

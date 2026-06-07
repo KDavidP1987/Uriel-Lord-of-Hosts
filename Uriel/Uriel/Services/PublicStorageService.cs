@@ -379,7 +379,7 @@ internal sealed class PublicStorageService
     /// (the proximity streamer may even re-enable it first; both paths are
     /// guarded). Clients drop the entity and re-receive it with fresh state.
     /// </summary>
-    static void ForceResync(Entity entity)
+    internal static void ForceResync(Entity entity)
     {
         if (entity.Has<ProjectM.Network.UpToDateUserBitMask>())
             entity.With((ref ProjectM.Network.UpToDateUserBitMask m) => m.Value = default);

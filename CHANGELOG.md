@@ -8,6 +8,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.13.0] - 2026-06-07
+
+### Changed — stair swap is now an IDENTITY swap (the mod owner's insight)
+- All destroy/rebuild routes failed live (raw spawn → unmanaged "permanent"
+  stairs; DestroyUtility → invisible ghosts holding the grid; the vanilla
+  dismantle event only starts a timed ability that never completes outside
+  build mode; the vanilla build event was refused). New approach, proposed by
+  the mod owner: since same-archetype cosmetics are structurally identical
+  and ALL stair segments are style-agnostic (verified: the BP root's prefab
+  id alone carries the cosmetic), the swap now simply **rewrites the placed
+  stair's prefab identity in place** (`PrefabGUID` + `BlueprintData.Guid`).
+- **Nothing is destroyed or placed**: the stair remains the original
+  vanilla-built object — registration, tile-grid claims, floor attachments,
+  and dismantle behavior all untouched; neighbors reference it by entity id
+  and are unaffected. Free, instant, atomic; no materials move at all.
+- Client visual refresh rides the resync blink; if a swapped stair still
+  shows the old look, step away and back (or relog) — the change is already
+  applied server-side (the reply says so too). `.uriel stairpurge` stays for
+  cleaning up ghosts left by the earlier mechanisms (purge each half of a
+  tall staircase, restart afterwards).
+
 ## [0.12.2] - 2026-06-07
 
 ### Fixed — forced-dismantle fallback completes the swap

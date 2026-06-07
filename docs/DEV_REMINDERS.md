@@ -54,6 +54,19 @@ belongs here: things that bit once and must not bite twice.
 
 ## Lessons learned (append below as they happen)
 
+- **2026-06-07 (v0.13.0) — when two prefabs are structurally identical, swap
+  the IDENTITY, not the entity.** Four destroy/rebuild routes failed for stair
+  restyling (raw spawn → unmanaged; DestroyUtility → ghost grid claims;
+  dismantle event → starts a timed ability that never completes outside build
+  mode; build event → refused). The owner's insight won: same-archetype stair
+  cosmetics are component-identical and the TM_ segments are style-agnostic,
+  so rewriting the BP root's `PrefabGUID` (+ `BlueprintData.Guid`) in place IS
+  the swap — the entity stays the original vanilla-placed object with all
+  registration/grid/attachment state intact. Generalize: prefer identity
+  mutation over destroy+recreate whenever the prefab dump proves structural
+  equality. (Client visual refresh is the remaining replication question —
+  same family as the share-blink saga.)
+
 - **2026-06-07 (v0.12.0) — raw-Instantiated tiles are never real build objects.**
   Two rounds of component-copying (transform/tile/ownership, then the
   StaticTransform-index fix) still produced "permanent" stairs the build UI

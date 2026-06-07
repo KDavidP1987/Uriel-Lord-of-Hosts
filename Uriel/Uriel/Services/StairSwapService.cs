@@ -280,242 +280,36 @@ internal sealed class StairSwapService
         return null;
     }
 
+
     /// <summary>
-    /// The actual swap (v0.12.1 — FULL vanilla pipeline, BOTH directions). Live
-    /// testing proved DestroyUtility on a placed stair leaves GHOSTS: the tile
-    /// grid stays claimed and the fused segments' collision survives (invisible
-    /// but walkable, can't build over it) — which is also why the v0.12.0 build
-    /// event was refused (the cell never read as free). So removal now goes
-    /// through the game's own DISMANTLE event, then placement through its BUILD
-    /// event once the old root is confirmed gone. Economics are pure vanilla:
-    /// dismantle refunds, build charges — identical to demolish+rebuild by hand.
+    /// The actual swap (v0.13.0 — IDENTITY SWAP, the mod owner's insight). All
+    /// prior routes failed live: raw spawn → unmanaged "permanent" stairs;
+    /// DestroyUtility → ghost grid claims; vanilla dismantle event → only starts
+    /// a timed ability that never completes outside build mode; vanilla build
+    /// event → refused. The breakthrough: same-archetype cosmetics are
+    /// structurally IDENTICAL and all 18 TM_ stair segments are STYLE-AGNOSTIC —
+    /// the BP root's PrefabGUID alone carries the cosmetic. So the swap simply
+    /// REWRITES THE ROOT'S IDENTITY in place. Nothing is destroyed or placed:
+    /// the stair remains the original vanilla-built object (registration, grid
+    /// claims, floor attachments, dismantle behavior untouched), and neighbors
+    /// referencing it by entity id are unaffected. Free, instant, atomic.
     /// </summary>
     bool ExecuteSwap(Entity oldRoot, PrefabGUID targetGuid, string archetype, string fromStyle, string toStyle,
         Entity character, Entity userEntity, out string message)
     {
-        message = null;
+        // Rewrite the prefab identity (the cosmetic).
+        oldRoot.With((ref PrefabGUID g) => g._Value = targetGuid._Value);
+        // Keep the blueprint identity consistent (dismantle/refund/menu data).
+        if (oldRoot.Has<BlueprintData>())
+            oldRoot.With((ref BlueprintData b) => b.Guid = targetGuid);
 
-        // ---- capture placement from the old root ----
-        if (!oldRoot.TryGetComponent<Unity.Transforms.Translation>(out var translation)
-            || !oldRoot.TryGetComponent<TilePosition>(out var tilePos))
-        {
-            message = "This stair is missing placement data and can't be swapped.";
-            return false;
-        }
-        if (!oldRoot.TryGetComponent<ProjectM.Network.NetworkId>(out var oldNetId))
-        {
-            message = "This stair has no network id (a broken one from an older build?) — ask an admin to '.uriel stairpurge' near it, then rebuild.";
-            return false;
-        }
-        var spawnPos = translation.Value;
-        var spawnRot = tilePos.TileRotation;
-        var tile = tilePos.Tile;
+        // Push the new identity to connected clients (entity re-receive).
+        PublicStorageService.ForceResync(oldRoot);
 
-        // ---- 1. vanilla DISMANTLE (releases grid claims + fused children, refunds materials) ----
-        FireTileEvent(character, userEntity, ev =>
-        {
-            Core.EntityManager.AddComponentData(ev, new NetworkEventType
-            {
-                EventId = NetworkEvents.EventId_DismantleTileModelEvent,
-                IsAdminEvent = false,
-                IsDebugEvent = false,
-            });
-            Core.EntityManager.AddComponentData(ev, new DismantleTileModelEvent { Target = oldNetId });
-        });
-        Core.Log.LogInfo($"[Uriel STAIRS] dismantle event fired for {fromStyle} {archetype} at tile ({tile.x},{tile.y}).");
-
-        // ---- 2. poll briefly for the vanilla dismantle to complete; if it doesn't
-        //         (live finding: the event only STARTS the timed dismantle ability,
-        //         which doesn't finish outside real build-mode), FORCE-dismantle:
-        //         manual refund + purge the root AND its segments (proven by
-        //         stairpurge to genuinely free the cell), then build.
-        Entity capturedChar = character, capturedUser = userEntity, capturedOld = oldRoot;
-        int tries = 0;
-        void WaitThenBuild()
-        {
-            try
-            {
-                if (capturedOld.Exists())
-                {
-                    if (++tries <= 3) { Tick.RunLater(10, WaitThenBuild); return; }
-
-                    // ---- forced dismantle path ----
-                    if (!TryGrantBuildCost(capturedChar, targetGuid, out string grantErr))
-                    {
-                        ChatNotify.ToUserEntity(capturedUser, $"[Uriel] {grantErr}");
-                        Core.Log.LogWarning("[Uriel STAIRS] forced dismantle aborted (no inventory room for the refund); stair untouched.");
-                        return;
-                    }
-                    int purged = PurgeStairEntitiesAt(spawnPos, 3f);
-                    Core.Log.LogInfo($"[Uriel STAIRS] forced dismantle: purged {purged} stair entity(ies) at the spot (vanilla dismantle didn't complete).");
-                    Tick.RunLater(5, () => FireBuildAndVerify(BuildResourceConsumeType.LocalInventory));
-                    return;
-                }
-                // vanilla dismantle completed (refund already paid by the game)
-                FireBuildAndVerify(BuildResourceConsumeType.SharedInventory);
-            }
-            catch (Exception ex)
-            {
-                Core.Log.LogError($"[Uriel STAIRS] swap build step failed: {ex}");
-            }
-        }
-
-        void FireBuildAndVerify(BuildResourceConsumeType consumeType)
-        {
-            try
-            {
-                FireTileEvent(capturedChar, capturedUser, ev =>
-                {
-                    Core.EntityManager.AddComponentData(ev, new NetworkEventType
-                    {
-                        EventId = NetworkEvents.EventId_BuildTileModelEvent,
-                        IsAdminEvent = false,
-                        IsDebugEvent = false,
-                    });
-                    Core.EntityManager.AddComponentData(ev, new BuildTileModelEvent
-                    {
-                        PrefabGuid = targetGuid,
-                        SpawnTranslation = new Unity.Transforms.Translation { Value = spawnPos },
-                        SpawnTileRotation = spawnRot,
-                        VariationIndex = 0,
-                        ResourceConsumeType = consumeType,
-                        RebuildUniqueKey = default,
-                    });
-                });
-                Core.Log.LogInfo($"[Uriel STAIRS] build event fired ({consumeType}): {archetype} {fromStyle} → {toStyle} at tile ({tile.x},{tile.y}).");
-
-                Tick.RunLater(45, () =>
-                {
-                    try
-                    {
-                        // A tall staircase is TWO stacked placements (top/bottom halves,
-                        // live finding) — verify by finding the TARGET style near the
-                        // spot, not the closest stair (which may be the untouched half).
-                        if (StairWithStyleNear(spawnPos, 2.5f, archetype, toStyle))
-                        {
-                            ChatNotify.ToUserEntity(capturedUser, $"[Uriel] Stair swapped: {fromStyle} → {toStyle}.");
-                            Core.Log.LogInfo("[Uriel STAIRS] swap verified — vanilla placement succeeded.");
-                        }
-                        else
-                        {
-                            ChatNotify.ToUserEntity(capturedUser, "[Uriel] The old stair was removed (materials refunded) but the game refused the new placement — place the new style by hand from the build menu.");
-                            Core.Log.LogWarning($"[Uriel STAIRS] swap verify: no {toStyle} {archetype} stair found at the spot. Refund covers the rebuild.");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Core.Log.LogError($"[Uriel STAIRS] swap verify failed: {ex}");
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                Core.Log.LogError($"[Uriel STAIRS] build event failed: {ex}");
-            }
-        }
-
-        Tick.RunLater(10, WaitThenBuild);
-
-        message = $"Swapping {fromStyle} → {toStyle} ({archetype})…";
+        Core.Log.LogInfo($"[Uriel STAIRS] identity swap: {archetype} {fromStyle} -> {toStyle} (entity preserved).");
+        message = $"Stair swapped: {fromStyle} -> {toStyle} ({archetype}). If it still LOOKS like the old style, step away and back (or relog) - the change is already applied.";
         return true;
     }
-
-    /// <summary>Refund the blueprint's full build cost to the player (forced-dismantle path). False + error if their inventory has no room.</summary>
-    static bool TryGrantBuildCost(Entity character, PrefabGUID blueprintGuid, out string error)
-    {
-        error = null;
-        if (!Core.PrefabCollectionSystem._PrefabLookupMap.TryGetValue(blueprintGuid, out Entity prefab)) return true;
-        if (!Core.ServerGameManager.TryGetBuffer<BlueprintRequirementBuffer>(prefab, out var reqs)) return true;
-        var granted = new System.Collections.Generic.List<(PrefabGUID Item, int Amount)>();
-        for (int i = 0; i < reqs.Length; i++)
-        {
-            var req = reqs[i];
-            if (req.Amount <= 0) continue;
-            if (!Core.ServerGameManager.TryAddInventoryItem(character, req.PrefabGUID, req.Amount))
-            {
-                foreach (var g in granted)
-                    if (InventoryUtilities.TryGetInventoryEntity(Core.EntityManager, character, out Entity inv))
-                        Core.ServerGameManager.TryRemoveInventoryItem(inv, g.Item, g.Amount);
-                error = $"Your inventory needs room for the swap materials ({req.Amount}× {req.PrefabGUID.GetPrefabName()}). Make space and retry.";
-                return false;
-            }
-            granted.Add((req.PrefabGUID, req.Amount));
-        }
-        return true;
-    }
-
-    /// <summary>Destroy every stair entity (roots + segments) within radius of a point — frees the cell (stairpurge-proven).</summary>
-    static int PurgeStairEntitiesAt(Unity.Mathematics.float3 pos, float radius)
-    {
-        var builder = new EntityQueryBuilder(Allocator.Temp)
-            .AddAll(new(Il2CppType.Of<TilePosition>(), ComponentType.AccessMode.ReadOnly))
-            .AddAll(new(Il2CppType.Of<Unity.Transforms.Translation>(), ComponentType.AccessMode.ReadOnly))
-            .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
-        var query = Core.EntityManager.CreateEntityQuery(ref builder);
-        var entities = query.ToEntityArray(Allocator.Temp);
-        int purged = 0;
-        try
-        {
-            float rSq = radius * radius;
-            for (int i = 0; i < entities.Length; i++)
-            {
-                var e = entities[i];
-                string name = e.GetPrefabGuid().GetPrefabName();
-                if (!name.StartsWith("BP_Castle_Stairs_", StringComparison.OrdinalIgnoreCase)
-                    && !name.StartsWith("TM_Castle_Stairs_", StringComparison.OrdinalIgnoreCase)) continue;
-                if (!e.TryGetComponent<Unity.Transforms.Translation>(out var t)) continue;
-                float dx = t.Value.x - pos.x, dy = t.Value.y - pos.y, dz = t.Value.z - pos.z;
-                if (dx * dx + dy * dy + dz * dz > rSq) continue;
-                DestroyUtility.Destroy(Core.EntityManager, e);
-                purged++;
-            }
-        }
-        finally
-        {
-            entities.Dispose();
-        }
-        return purged;
-    }
-
-    /// <summary>Is there a stair of the given archetype+style within radius of the point?</summary>
-    static bool StairWithStyleNear(Unity.Mathematics.float3 pos, float radius, string archetype, string styleKey)
-    {
-        var builder = new EntityQueryBuilder(Allocator.Temp)
-            .AddAll(new(Il2CppType.Of<TilePosition>(), ComponentType.AccessMode.ReadOnly))
-            .AddAll(new(Il2CppType.Of<Unity.Transforms.Translation>(), ComponentType.AccessMode.ReadOnly))
-            .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
-        var query = Core.EntityManager.CreateEntityQuery(ref builder);
-        var entities = query.ToEntityArray(Allocator.Temp);
-        try
-        {
-            float rSq = radius * radius;
-            for (int i = 0; i < entities.Length; i++)
-            {
-                var e = entities[i];
-                if (!TryParseStairName(e.GetPrefabGuid().GetPrefabName(), out string arch, out string style)) continue;
-                if (!string.Equals(arch, archetype, StringComparison.OrdinalIgnoreCase)) continue;
-                if (!string.Equals(style, styleKey, StringComparison.OrdinalIgnoreCase)) continue;
-                if (!e.TryGetComponent<Unity.Transforms.Translation>(out var t)) continue;
-                float dx = t.Value.x - pos.x, dy = t.Value.y - pos.y, dz = t.Value.z - pos.z;
-                if (dx * dx + dy * dy + dz * dz <= rSq) return true;
-            }
-        }
-        finally
-        {
-            entities.Dispose();
-        }
-        return false;
-    }
-
-    /// <summary>Create a synthesized client-style tile event entity (FromCharacter + ReceiveNetworkEventTag + caller-supplied event + NetworkEventType).</summary>
-    static void FireTileEvent(Entity character, Entity userEntity, Action<Entity> addEventComponents)
-    {
-        Entity ev = Core.EntityManager.CreateEntity();
-        Core.EntityManager.AddComponentData(ev, new FromCharacter { User = userEntity, Character = character });
-        Core.EntityManager.AddComponent<ReceiveNetworkEventTag>(ev);
-        addEventComponents(ev);
-    }
-
     /// <summary>
     /// Admin ghost cleanup (v0.12.1): DestroyUtility-destroyed stairs leave
     /// invisible collision + grid claims. Purge every stair entity (BP roots and
