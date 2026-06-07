@@ -3,6 +3,14 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.4.1 (2026-06-06)
+
+- Fix: depositing into a shared container no longer fails with "container is
+  full" (items were always safely refunded, but the deposit never landed).
+  Cost payments had the same latent bug — also fixed.
+- Unshare restores the chest's ownership more faithfully; if a chest looks
+  locked right after unsharing, close and reopen it.
+
 ## 0.4.0 (2026-06-06)
 
 - Share modifiers now stack in one command, any order:

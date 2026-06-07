@@ -54,6 +54,16 @@ belongs here: things that bit once and must not bite twice.
 
 ## Lessons learned (append below as they happen)
 
+- **2026-06-06 (v0.4.1) — the tile entity is NOT the inventory carrier.**
+  Placed containers keep their items on a separate attached external-inventory
+  entity (`InventoryInstanceElement.ExternalInventoryEntityPrefabGuid →
+  External_Inventory`). `TryAddInventoryItem`/`TryRemoveInventoryItem` against
+  the `TM_*` tile entity silently fail ("container full" symptoms). ALWAYS
+  resolve through `InventoryUtilities.TryGetInventoryEntity` (or check for an
+  `InventoryBuffer` directly) before any inventory mutation — see
+  `PublicStorageService.ResolveInventoryEntity`. Player characters resolve
+  internally and are exempt; containers are not.
+
 - **2026-06-06 (v0.2.1) — default EntityQueries skip Disabled entities.**
   World chests AND placed castle objects carry `DisableWhenNoPlayersInRange`,
   so they are `Disabled` whenever no player is nearby — which is *always* the

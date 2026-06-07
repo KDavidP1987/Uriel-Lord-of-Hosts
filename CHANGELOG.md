@@ -8,6 +8,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.4.1] - 2026-06-06
+
+### Fixed
+- **Deposits into shared containers always failed with "container is full"**
+  (live-test report). Root cause: placed containers keep their items on a
+  separate attached external-inventory entity; v0.4.0 passed the TILE entity
+  to `TryAddInventoryItem`, which silently fails. All inventory mutations now
+  resolve the real inventory carrier first (`ResolveInventoryEntity` via
+  `InventoryUtilities.TryGetInventoryEntity`). The same bug would have broken
+  cost-payment delivery — fixed there too. (No items were ever lost — the
+  refund path worked as designed.)
+- Deposits now capacity-check before moving (consistent with payments) and
+  every failure branch logs a `[Uriel SHARE]` warning for diagnosability.
+- Unshare now restores the container's team from a SIBLING private container
+  on the same castle heart (exactly the team a placed chest should carry),
+  falling back to the castle heart, and logs the restored value.
+
+### Notes
+- If a chest still looks locked right after `.uriel unshare`, close and
+  reopen it — the client UI can hold the pre-restore state.
+
 ## [0.4.0] - 2026-06-06
 
 ### Added

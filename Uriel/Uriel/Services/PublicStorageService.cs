@@ -286,7 +286,11 @@ internal sealed class PublicStorageService
         container.With((ref TeamReference tr) => tr.Value._Value = donorRef);
     }
 
-    /// <summary>Restore the container's team from its castle heart (the authoritative owner team).</summary>
+    /// <summary>
+    /// Restore the container's team on unshare. Preferred donor: a SIBLING private
+    /// container on the same castle heart (exactly the team a placed chest should
+    /// carry); fallback: the castle heart itself. Logs what was restored.
+    /// </summary>
     bool RestoreCastleTeam(Entity container, out string error)
     {
         error = null;
@@ -296,16 +300,57 @@ internal sealed class PublicStorageService
             return false;
         }
         Entity heart = conn.CastleHeartEntity.GetEntityOnServer();
-        if (!heart.Exists() || !heart.TryGetComponent<Team>(out var heartTeam)
-            || !heart.TryGetComponent<TeamReference>(out var heartRef))
+        if (!heart.Exists())
         {
-            error = "Castle heart not found or has no team; cannot restore.";
+            error = "Castle heart not found; cannot restore.";
             return false;
         }
-        var refEntity = heartRef.Value._Value;
-        container.With((ref Team t) => { t.Value = heartTeam.Value; t.FactionIndex = heartTeam.FactionIndex; });
+
+        // Preferred donor: sibling private container on the same heart.
+        Entity donor = FindSiblingTeamDonor(container, heart);
+        if (donor == Entity.Null) donor = heart; // fallback
+
+        if (!donor.TryGetComponent<Team>(out var donorTeam)
+            || !donor.TryGetComponent<TeamReference>(out var donorRef))
+        {
+            error = "No team source found to restore from; cannot restore.";
+            return false;
+        }
+        var refEntity = donorRef.Value._Value;
+        container.With((ref Team t) => { t.Value = donorTeam.Value; t.FactionIndex = donorTeam.FactionIndex; });
         container.With((ref TeamReference tr) => tr.Value._Value = refEntity);
+        Core.Log.LogInfo($"[Uriel SHARE] unshare: restored team on {container.GetPrefabGuid().GetPrefabName()} from {(donor == heart ? "castle heart" : "sibling container")} (Team.Value={donorTeam.Value}).");
         return true;
+    }
+
+    /// <summary>A private (non-registered) container on the same castle heart, to copy an authentic placed-chest team from.</summary>
+    Entity FindSiblingTeamDonor(Entity container, Entity heart)
+    {
+        var builder = new EntityQueryBuilder(Allocator.Temp)
+            .AddAll(new(Il2CppType.Of<InventoryOwner>(), ComponentType.AccessMode.ReadOnly))
+            .AddAll(new(Il2CppType.Of<TilePosition>(), ComponentType.AccessMode.ReadOnly))
+            .AddAll(new(Il2CppType.Of<CastleHeartConnection>(), ComponentType.AccessMode.ReadOnly))
+            .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
+        var query = Core.EntityManager.CreateEntityQuery(ref builder);
+        var entities = query.ToEntityArray(Allocator.Temp);
+        try
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var e = entities[i];
+                if (e == container) continue;
+                if (!e.TryGetComponent<CastleHeartConnection>(out var c)
+                    || c.CastleHeartEntity.GetEntityOnServer() != heart) continue;
+                if (FindEntry(e) is not null) continue; // shared siblings carry the neutral team — skip
+                if (!e.Has<Team>() || !e.Has<TeamReference>()) continue;
+                return e;
+            }
+        }
+        finally
+        {
+            entities.Dispose();
+        }
+        return Entity.Null;
     }
 
     /// <summary>Does this character belong to the team that currently controls the container's castle?</summary>
@@ -659,6 +704,20 @@ internal sealed class PublicStorageService
     // ================================================================ move-event enforcement (v0.3.0)
 
     /// <summary>
+    /// Resolve the entity that actually CARRIES the InventoryBuffer. Placed
+    /// containers keep their items on a separate attached external-inventory
+    /// entity — passing the tile entity to TryAdd/RemoveInventoryItem fails
+    /// (v0.4.0's deposit bug: every add reported "full").
+    /// </summary>
+    static Entity ResolveInventoryEntity(Entity entity)
+    {
+        if (entity == Entity.Null) return Entity.Null;
+        if (Core.ServerGameManager.TryGetBuffer<InventoryBuffer>(entity, out _)) return entity;
+        if (InventoryUtilities.TryGetInventoryEntity(Core.EntityManager, entity, out Entity inv)) return inv;
+        return Entity.Null;
+    }
+
+    /// <summary>
     /// Map an inventory entity from a move event back to its container: the entity
     /// itself if registered, else via InventoryConnection.InventoryOwner.
     /// </summary>
@@ -929,15 +988,22 @@ internal sealed class PublicStorageService
             return false;
         }
 
+        Entity payInv = ResolveInventoryEntity(payTarget); // the inventory CARRIER, not the tile entity
+        if (payInv == Entity.Null)
+        {
+            denyMsg = "Payment destination has no resolvable inventory — tell the owner. No payment was taken.";
+            return false;
+        }
         if (!Core.ServerGameManager.TryRemoveInventoryItem(playerInv, costItem, entry.CostAmount))
         {
             denyMsg = "Payment could not be collected (inventory changed?). Try again.";
             return false;
         }
-        if (!Core.ServerGameManager.TryAddInventoryItem(payTarget, costItem, entry.CostAmount))
+        if (!Core.ServerGameManager.TryAddInventoryItem(payInv, costItem, entry.CostAmount))
         {
             // Should not happen after the capacity check — refund defensively.
             Core.ServerGameManager.TryAddInventoryItem(character, costItem, entry.CostAmount);
+            Core.Log.LogWarning($"[Uriel SHARE] payment: TryAddInventoryItem failed AFTER capacity check (target={payInv}, container={payTarget.GetPrefabGuid().GetPrefabName()}); refunded.");
             denyMsg = "Payment delivery failed unexpectedly — refunded. Try again.";
             return false;
         }
@@ -948,31 +1014,50 @@ internal sealed class PublicStorageService
     /// <summary>
     /// Execute a deposit ourselves, then destroy the vanilla event (which would
     /// have been refused for a neutral-team container). Refunds on failure.
+    /// Failure branches always log — this path broke once (v0.4.0 passed the tile
+    /// entity instead of the inventory carrier) and must stay diagnosable.
     /// </summary>
     void ManualDeposit(Entity eventEntity, Entity character, Entity userEntity,
         Entity fromInv, int fromSlot, Entity toContainer, bool verbose)
     {
         try
         {
-            if (!Core.ServerGameManager.TryGetBuffer<InventoryBuffer>(fromInv, out var buffer)
+            Entity sourceInv = ResolveInventoryEntity(fromInv);
+            if (sourceInv == Entity.Null)
+                sourceInv = ResolveInventoryEntity(character); // event id didn't resolve — the source is the depositor
+            if (!Core.ServerGameManager.TryGetBuffer<InventoryBuffer>(sourceInv, out var buffer)
                 || fromSlot < 0 || fromSlot >= buffer.Length)
             {
-                return; // not a readable source inventory — leave the event to vanilla
+                Core.Log.LogWarning($"[Uriel SHARE] deposit: source inventory unreadable (fromInv={fromInv}, resolved={sourceInv}, slot={fromSlot}); leaving event to vanilla.");
+                return;
             }
             var slot = buffer[fromSlot];
             PrefabGUID itemGuid = slot.ItemType;
             int amount = slot.Amount;
             if (itemGuid._Value == 0 || amount <= 0) return;
 
-            if (!Core.ServerGameManager.TryRemoveInventoryItem(fromInv, itemGuid, amount))
+            Entity targetInv = ResolveInventoryEntity(toContainer);
+            if (targetInv == Entity.Null)
             {
+                Core.Log.LogWarning($"[Uriel SHARE] deposit: container {toContainer.GetPrefabGuid().GetPrefabName()} has no resolvable inventory entity; leaving event to vanilla.");
+                return;
+            }
+            if (CountFit(toContainer, itemGuid) < amount)
+            {
+                Deny(eventEntity, userEntity, "That container doesn't have room for this stack.");
+                return;
+            }
+            if (!Core.ServerGameManager.TryRemoveInventoryItem(sourceInv, itemGuid, amount))
+            {
+                Core.Log.LogWarning($"[Uriel SHARE] deposit: TryRemoveInventoryItem failed (source={sourceInv}, item={itemGuid.GetPrefabName()}×{amount}).");
                 Deny(eventEntity, userEntity, "Deposit failed (item could not be moved).");
                 return;
             }
-            if (!Core.ServerGameManager.TryAddInventoryItem(toContainer, itemGuid, amount))
+            if (!Core.ServerGameManager.TryAddInventoryItem(targetInv, itemGuid, amount))
             {
                 Core.ServerGameManager.TryAddInventoryItem(character, itemGuid, amount); // refund
-                Deny(eventEntity, userEntity, "That container is full.");
+                Core.Log.LogWarning($"[Uriel SHARE] deposit: TryAddInventoryItem failed AFTER capacity check (target={targetInv}, container={toContainer.GetPrefabGuid().GetPrefabName()}, item={itemGuid.GetPrefabName()}×{amount}); refunded.");
+                Deny(eventEntity, userEntity, "Deposit failed unexpectedly — items refunded. Tell the admin to check the server log.");
                 return;
             }
             Core.EntityManager.DestroyEntity(eventEntity); // we did the move; don't let vanilla double-process
