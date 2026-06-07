@@ -15,6 +15,7 @@ internal static class Settings
     // ---- Feature: public storage (per-container opt-in) ----
     public static ConfigEntry<bool> PublicStorage_Enabled { get; private set; }
     public static ConfigEntry<bool> PublicPrison_Enabled { get; private set; }
+    public static ConfigEntry<float> PublicStorage_MaxTargetDistance { get; private set; }
 
     // ---- Diagnostics ----
     public static ConfigEntry<bool> VerboseLogging { get; private set; }
@@ -35,7 +36,12 @@ internal static class Settings
             "PublicStorage", "PrisonEnabled", true,
             "Allow a prison cell's owner to mark a SPECIFIC cell as publicly accessible (others may " +
             "draw blood from / take the prisoner). Separate switch from chest sharing — prison cells " +
-            "are a different container type and are governed independently.");
+            "are a different container type and are governed independently. (Not yet implemented.)");
+
+        PublicStorage_MaxTargetDistance = config.Bind(
+            "PublicStorage", "MaxTargetDistance", 5f,
+            "How close (meters) your aim point must be to a container for '.uriel share'/'.uriel unshare' " +
+            "to target it.");
 
         VerboseLogging = config.Bind(
             "Diagnostics", "VerboseLogging", false,

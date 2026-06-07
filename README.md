@@ -9,12 +9,13 @@ fixes, each individually toggleable by server admins.
 
 **Status: pre-release.** Not yet published to Thunderstore.
 
-## Planned initial features
+## Features
 
 | Feature | Status | Design doc |
 |---|---|---|
-| **Stair hot-swap** — swap placed stairs to another stair type without demolishing | Design | [docs/features/STAIR_HOTSWAP.md](docs/features/STAIR_HOTSWAP.md) |
-| **Public storage** — per-container opt-in: mark a specific chest (or, separately, a prison cell) publicly accessible | Design | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
+| **Public storage** — per-container opt-in: mark a specific chest publicly accessible (`.uriel share` / `.uriel unshare`) | Implemented (experimental, pending live-server validation) | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
+| **Public prison cells** — separately mark a prison cell publicly accessible | Design | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
+| **Stair hot-swap** — swap placed stairs to another stair type without demolishing | Researched | [docs/features/STAIR_HOTSWAP.md](docs/features/STAIR_HOTSWAP.md) |
 
 Every feature ships behind its own config switch — Uriel is never
 all-or-nothing.

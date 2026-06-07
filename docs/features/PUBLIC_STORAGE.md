@@ -1,8 +1,35 @@
 # Feature: Public Storage (per-container opt-in)
 
-**Status:** RESEARCHED — patch points identified, approach comparison pending POC
+**Status:** IMPLEMENTED v0.2.0 (storage class only) — **pending live-server validation**
 **Config:** `[PublicStorage] Enabled` (default `true`),
-`[PublicStorage] PrisonEnabled` (default `true`)
+`[PublicStorage] PrisonEnabled` (default `true`, prison not yet implemented),
+`[PublicStorage] MaxTargetDistance` (default `5`)
+
+## Implementation decision (v0.2.0)
+
+Went with a refined **Approach B (team-swap)** rather than validation patches,
+after the prefab comparison showed castle stashes and world chests carry
+IDENTICAL default `Team`/`TeamReference` — meaning access is decided purely by
+the *runtime* team assigned at placement, and world chests (neutral team) are
+openable by everyone, client prompt included (Team replicates).
+
+- **Share** = copy a live world chest's `Team`/`TeamReference` onto the
+  container ("neutral donor", resolved lazily from known `TM_WorldChest_*`
+  GUIDs and cached).
+- **Unshare** = restore `Team`/`TeamReference` from the container's own
+  `CastleHeartConnection` → castle heart. The heart is always the
+  authoritative restore source, so no original-team persistence is needed —
+  this also makes recovery trivial (worst case: restart reverts everything
+  not in the registry; `.uriel unshareall` force-restores from hearts).
+- **Ownership check** = caller's `Team.Value` vs. the castle *heart's*
+  `Team.Value` (not the container's, which is neutral while shared).
+- **Registry** keys on prefab GUID + `TilePosition.Tile` (stable across
+  save/load; entity/NetworkIds are not), persisted at
+  `BepInEx/config/Uriel/public_containers.json`, re-applied at server init.
+- Zero Harmony patches needed for this mechanism — if validation proves the
+  hypothesis wrong, the per-system patch table below is the fallback plan.
+
+Code: `Services/PublicStorageService.cs`, `Commands/ShareCommands.cs`.
 
 ## Problem
 
@@ -139,14 +166,28 @@ load. Schema version field from day one.
 - Two containers at the same position after rebuild → durable key must not
   mis-attach the public flag.
 
-## Test plan (fill in during implementation)
+## Test plan (v0.2.0 build — run on the live local server)
 
-- [ ] Owner shares chest → stranger can open, take, put, sort, split,
-      move-all. Unshare → all denied again.
-- [ ] Prison cell share (separate command/config) → stranger can extract
-      blood / feed; chest sharing does NOT affect cells and vice versa.
-- [ ] Restart server → shares persist; destroyed containers pruned.
-- [ ] Non-owner cannot share/unshare someone else's container.
-- [ ] Clan member of owner can still use container normally.
-- [ ] Each config switch off → that class behaves pure vanilla.
-- [ ] Raid scenario: public flag doesn't alter raid loot rules beyond intent.
+**The decisive test (validates the whole mechanism):**
+- [ ] Owner: aim at own chest, `.uriel share` → confirm reply. Second
+      account (different clan/no clan): walk up — does the open prompt
+      appear? Can they open, take, put? ← the team-swap hypothesis test.
+
+Then:
+- [ ] Sort, split, move-all on the shared chest from the stranger account.
+- [ ] `.uriel unshare` → stranger denied again (prompt gone/locked).
+- [ ] Owner + clanmate can still use the chest normally WHILE shared.
+- [ ] Restart server → share persists (registry re-applied; check log line
+      `[Uriel SHARE] re-applied public team ...`).
+- [ ] Stranger cannot `.uriel share`/`unshare` someone else's container.
+- [ ] `.uriel shared`, `.uriel sharedall`, `.uriel unshareall` outputs sane.
+- [ ] Aim at prison cell + `.uriel share` → refused with "coming soon".
+- [ ] `PublicStorage.Enabled = false` → commands refuse; restart with it
+      false → shares NOT re-applied (containers private).
+- [ ] Castle decay/refault behavior: shared chest in decayed castle.
+- [ ] Raid scenario: shared chest during breach — no unintended changes.
+
+**If the stranger gets NO open prompt (client gates on something else):**
+fallback experiments, in order: (1) also neutralize `UserOwner.Owner`
+(store + restore); (2) check `NameableInteractable.OnlyAllySee/OnlyAllyRename`;
+(3) the per-system validation-patch table above (Approach A).

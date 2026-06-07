@@ -2,6 +2,7 @@ using BepInEx.Logging;
 using ProjectM;
 using ProjectM.Scripting;
 using Unity.Entities;
+using Uriel.Services;
 
 namespace Uriel;
 
@@ -19,6 +20,8 @@ internal static class Core
     public static PrefabCollectionSystem PrefabCollectionSystem { get; private set; }
     public static ServerScriptMapper ServerScriptMapper { get; private set; }
     public static ServerGameManager ServerGameManager => ServerScriptMapper.GetServerGameManager();
+
+    public static PublicStorageService PublicStorage { get; private set; }
 
     public static ManualLogSource Log => Plugin.PluginLog;
     public static bool IsReady { get; private set; }
@@ -55,6 +58,12 @@ internal static class Core
             ServerScriptMapper = server.GetExistingSystemManaged<ServerScriptMapper>();
 
             // Feature services initialize here (after game data is loaded), in dependency order.
+            PublicStorage = new PublicStorageService();
+            PublicStorage.Load();
+            // Placement teams are restored from the game save; our share state lives only
+            // in the registry — re-assert the neutral team on registered containers.
+            try { PublicStorage.ReapplyAll(); }
+            catch (System.Exception ex) { Log.LogWarning($"[Uriel SHARE] re-apply failed: {ex}"); }
 
             IsReady = true;
             Log.LogInfo($"Uriel initialized via {trigger} (attempt #{_initAttempts}). Prefab map has {prefabSystem.SpawnableNameToPrefabGuidDictionary.Count} entries.");

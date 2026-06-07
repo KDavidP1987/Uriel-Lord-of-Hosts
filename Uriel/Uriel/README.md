@@ -8,24 +8,28 @@ players need nothing.
 
 ## Features
 
+### Public storage *(experimental — testing welcome!)*
+Mark a *specific* chest as publicly accessible so anyone on the server can use
+it — community chests, donation boxes, free-stuff stashes. Always
+per-container and owner-controlled: nothing is shared unless its owner shares
+it. Shares survive server restarts. Marking a prison cell public (so others
+may draw from your prisoners) is a separate upcoming feature.
+
 ### Stair hot-swap *(coming soon)*
 Swap placed stairs to another stair type straight from the build menu — no
 more demolishing a staircase just to change its style, the way other tiles
 already swap.
 
-### Public storage *(coming soon)*
-Mark a *specific* chest as publicly accessible so anyone on the server can use
-it — community chests, donation boxes, free-stuff stashes. Separately, mark a
-prison cell public so others may draw from your prisoners. Always per-container
-and owner-controlled: nothing is shared unless its owner shares it.
-
 ## Commands
 
 ```
-.uriel        → overview of the mod and active features
+.uriel                  → overview of the mod and active features
+.uriel share            → make the castle container you're aiming at PUBLIC
+.uriel unshare          → make it private again
+.uriel shared           → list the containers you've made public
+.uriel sharedall        → (admin) list all public containers on the server
+.uriel unshareall       → (admin) revert everything to private
 ```
-
-(Feature commands will be listed here as features ship.)
 
 ## Configuration
 
@@ -33,9 +37,10 @@ and owner-controlled: nothing is shared unless its owner shares it.
 
 | Section | Key | Default | Effect |
 |---|---|---|---|
-| StairSwap | Enabled | true | Allow in-place stair swapping |
 | PublicStorage | Enabled | true | Allow per-chest public sharing |
-| PublicStorage | PrisonEnabled | true | Allow per-cell public prison sharing |
+| PublicStorage | PrisonEnabled | true | Allow per-cell public prison sharing *(not yet implemented)* |
+| PublicStorage | MaxTargetDistance | 5 | Aim distance for `.uriel share`/`unshare` targeting |
+| StairSwap | Enabled | true | Allow in-place stair swapping *(not yet implemented)* |
 
 ## Requirements
 

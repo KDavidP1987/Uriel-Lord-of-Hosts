@@ -8,6 +8,39 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.2.0] - 2026-06-06
+
+### Added
+- **Public storage (experimental — first implementation, NOT yet validated
+  in-game).** Per-container opt-in sharing of placed castle containers:
+  - `.uriel share` / `.uriel unshare` — aim at one of your castle containers
+    to make it public / private (owner = anyone on the castle heart's team;
+    the original sharer and admins can also unshare).
+  - `.uriel shared` — list your public containers; `.uriel sharedall` /
+    `.uriel unshareall` (admin) — list/revert everything.
+  - Mechanism: team-swap. Sharing copies a live world chest's neutral
+    `Team`/`TeamReference` onto the container (world chests are openable by
+    everyone, and Team replicates to clients so the open prompt follows);
+    unsharing restores the team from the container's own castle heart — no
+    original-team persistence needed.
+  - Registry persists to `BepInEx/config/Uriel/public_containers.json`,
+    keyed by prefab GUID + tile coordinates (stable across restarts);
+    re-applied at every server init. Saved on change and on plugin unload.
+  - Guards: prison cells (separate upcoming feature) and servant coffins
+    are refused; targeting requires aiming within `MaxTargetDistance`
+    (config, default 5m); feature master switch `PublicStorage.Enabled`.
+- New config: `PublicStorage.MaxTargetDistance`.
+- `EntityExtensions` (IL2CPP-safe Exists/Has/Read/TryGetComponent/With,
+  steamId + prefab-name helpers), adapted from the proven Beelzebub set.
+
+### Known limitations / to validate in-game
+- The team-swap hypothesis (neutral team ⇒ stranger can open + take/put)
+  must be confirmed with a second account; fallback experiments are
+  documented in `docs/features/PUBLIC_STORAGE.md`.
+- Moving a shared container via castle edit changes its tile key; the share
+  reverts to private on next restart (entry kept until `.uriel unshareall`).
+- Raid/PvP interaction of neutral-team containers is untested.
+
 ## [0.1.0] - 2026-06-06
 
 ### Added

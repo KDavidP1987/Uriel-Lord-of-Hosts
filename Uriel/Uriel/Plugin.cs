@@ -40,6 +40,7 @@ public class Plugin : BasePlugin
     public override bool Unload()
     {
         CommandRegistry.UnregisterAssembly();
+        Core.PublicStorage?.SaveSync();
         Harmony?.UnpatchSelf();
         return true;
     }
