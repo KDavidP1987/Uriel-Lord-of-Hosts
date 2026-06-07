@@ -8,6 +8,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.12.0] - 2026-06-07
+
+### Fixed — stair swap now uses the game's own build pipeline
+- **Swapped stairs were still becoming permanent/unmanageable** (live retest:
+  the v0.9.0 StaticTransform fix wasn't the root cause). Verdict:
+  raw-instantiated tiles can never be real build objects — the placement
+  pipeline wires territory connections, attach-to-floor graphs, registration,
+  and placement history that component-copying can't replicate.
+- The swap now: (1) **refunds the stair's full material cost** to the caller
+  (same-archetype styles cost identically, so refund + vanilla build charge
+  nets zero), (2) destroys the old root, (3) fires the game's own
+  `BuildTileModelEvent` at the same spot/rotation — the new stair is placed
+  **exactly as if hand-built** (registered, highlightable, dismantlable,
+  client-synced), then (4) verifies and reports in chat.
+- **Failure is never a loss:** if the game refuses the placement, the player
+  keeps the refunded materials and can place the stair by hand.
+- **Repairing stuck stairs from older builds:** `.uriel stairswap` them to any
+  style with this version — the vanilla rebuild replaces the broken entity.
+- Note: the vanilla pipeline also re-validates blueprint/DLC unlock and
+  ownership server-side (defense in depth on top of Uriel's own checks).
+
 ## [0.11.0] - 2026-06-07
 
 ### Added — `nearest` targeting mode (for BCH UI integration)

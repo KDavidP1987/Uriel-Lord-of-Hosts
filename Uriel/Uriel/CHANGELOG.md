@@ -3,6 +3,15 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.12.0 (2026-06-07)
+
+- Fix: swapped stairs are now REAL build objects — highlightable, movable,
+  dismantlable — because the swap now rebuilds them through the game's own
+  placement system. Stairs stuck as "permanent" from earlier builds: swap
+  them once with this version to repair them. If the game ever refuses a
+  placement, you keep the stair's full material cost in your inventory and
+  can place it by hand — a swap can never lose your stair's value.
+
 ## 0.11.0 (2026-06-07)
 
 - All targeted commands accept a `nearest` option to act on the container or

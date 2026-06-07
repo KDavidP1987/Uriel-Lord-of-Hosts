@@ -1,6 +1,20 @@
 # Feature: Stair Hot-Swap
 
-**Status:** IMPLEMENTED v0.7.0 (2026-06-07) — pending live-server validation
+**Status:** REIMPLEMENTED v0.12.0 (2026-06-07) — vanilla-pipeline route; pending live validation
+
+## Mechanism revision (v0.12.0) — Route B failed live; Route A (vanilla events) is the answer
+
+Two live tests proved raw `Instantiate` + component copy (Route B, even with
+the v0.9.0 StaticTransform-index fix) produces "permanent" stairs the build
+UI can't highlight or dismantle — the placement pipeline wires territory
+connections, attach graphs, registration, and history that can't be
+replicated by hand. v0.12.0 switched to the originally-fallback Route A:
+refund the blueprint cost (`BlueprintRequirementBuffer` → player inventory) →
+`DestroyUtility` the old root → 3 frames later fire a synthesized
+`BuildTileModelEvent` (`FromCharacter` + `NetworkEventType
+{ EventId_BuildTileModelEvent }` + `ReceiveNetworkEventTag`,
+`ResourceConsumeType.LocalInventory`) → verify ~45 frames later and report
+via chat. Net-zero economics; failure leaves the player holding the refund.
 **Config:** `[StairSwap] Enabled` (default `true`), `[StairSwap] MaxTargetDistance` (default 6)
 **Code:** `Services/StairSwapService.cs`, `Commands/StairCommands.cs`
 

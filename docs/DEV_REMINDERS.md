@@ -54,6 +54,21 @@ belongs here: things that bit once and must not bite twice.
 
 ## Lessons learned (append below as they happen)
 
+- **2026-06-07 (v0.12.0) — raw-Instantiated tiles are never real build objects.**
+  Two rounds of component-copying (transform/tile/ownership, then the
+  StaticTransform-index fix) still produced "permanent" stairs the build UI
+  couldn't highlight/dismantle. The placement pipeline
+  (`PlaceTileModelSystem.TryDoStuff` → `ApplyPlacementResult`) wires territory
+  connections, the attach-to-floor graph, registration, and placement history
+  — un-replicable by hand. **To place a managed tile, fire the game's own
+  `BuildTileModelEvent`** (entity with `FromCharacter` + `NetworkEventType
+  { EventId_BuildTileModelEvent }` + `ReceiveNetworkEventTag` + the event;
+  KindredCommands' KickEvent shape). Net-zero economics: refund the
+  blueprint's `BlueprintRequirementBuffer` to the player first, consume
+  `LocalInventory`. Corollary: destroy-then-build needs a few frames between
+  (cell must read free), and a verify step — worst case the player keeps the
+  refund and rebuilds by hand.
+
 - **2026-06-07 (v0.8.0) — a Team swap alone does not make a castle container
   public; the client gates on the CASTLE LINK.** With the common
   `CanLootEnemyContainers=false` server setting, a container whose

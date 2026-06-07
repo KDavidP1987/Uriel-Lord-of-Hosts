@@ -258,7 +258,7 @@ internal sealed class StairSwapService
 
         try
         {
-            return ExecuteSwap(root, targetGuid, archetype, currentStyle, targetStyle, out message);
+            return ExecuteSwap(root, targetGuid, archetype, currentStyle, targetStyle, character, userEntity, out message);
         }
         catch (Exception ex)
         {
@@ -281,80 +281,121 @@ internal sealed class StairSwapService
     }
 
     /// <summary>
-    /// The actual in-place swap (KindredSchematics pattern): spawn new blueprint,
-    /// copy transform/tile components, wire ownership from the heart, destroy old.
+    /// The actual swap (v0.12.0 — VANILLA PIPELINE): live testing proved raw
+    /// Instantiate+component-copy produces unmanageable "permanent" stairs (the
+    /// game's placement pipeline wires territory connections, the attach-to-floor
+    /// graph, registration, and placement history that can't all be replicated by
+    /// hand). So: refund the old stair's materials to the caller, destroy the old
+    /// root, then fire the game's own BuildTileModelEvent at the same spot — the
+    /// new stair is placed exactly as if the player built it (fully registered,
+    /// editable, dismantlable, client-synced). Same-archetype costs are identical,
+    /// so refund+charge nets zero. Worst case (placement refused): the player
+    /// keeps the refunded materials and rebuilds by hand — never a loss.
     /// </summary>
-    bool ExecuteSwap(Entity oldRoot, PrefabGUID targetGuid, string archetype, string fromStyle, string toStyle, out string message)
+    bool ExecuteSwap(Entity oldRoot, PrefabGUID targetGuid, string archetype, string fromStyle, string toStyle,
+        Entity character, Entity userEntity, out string message)
     {
         message = null;
 
-        // ---- capture from the old root ----
+        // ---- capture placement from the old root ----
         if (!oldRoot.TryGetComponent<Unity.Transforms.Translation>(out var translation)
-            || !oldRoot.TryGetComponent<Unity.Transforms.Rotation>(out var rotation)
-            || !oldRoot.TryGetComponent<TilePosition>(out var tilePos)
-            || !oldRoot.TryGetComponent<CastleHeartConnection>(out var heartConn))
+            || !oldRoot.TryGetComponent<TilePosition>(out var tilePos))
         {
             message = "This stair is missing placement data and can't be swapped.";
             return false;
         }
-        oldRoot.TryGetComponent<TileBounds>(out var tileBounds);
+        var spawnPos = translation.Value;
+        var spawnRot = tilePos.TileRotation;
+        var tile = tilePos.Tile;
 
-        Entity heart = heartConn.CastleHeartEntity.GetEntityOnServer();
-        if (!heart.Exists() || !heart.TryGetComponent<TeamReference>(out var heartTeamRef))
-        {
-            message = "Castle heart not found — can't wire ownership for the new stair.";
-            return false;
-        }
-        Entity teamRefEntity = heartTeamRef.Value._Value;
-        if (!teamRefEntity.TryGetComponent<TeamData>(out var teamData))
-        {
-            message = "Castle team data not found — can't wire ownership for the new stair.";
-            return false;
-        }
-        heart.TryGetComponent<UserOwner>(out var heartUserOwner);
-
-        // ---- spawn the new blueprint ----
-        if (!Core.PrefabCollectionSystem._PrefabLookupMap.TryGetValue(targetGuid, out Entity prefab))
+        if (!Core.PrefabCollectionSystem._PrefabLookupMap.TryGetValue(targetGuid, out Entity targetPrefab))
         {
             message = "Target style prefab not found on this server.";
             return false;
         }
-        Entity newRoot = Core.EntityManager.Instantiate(prefab);
 
-        newRoot.With((ref Unity.Transforms.Translation t) => t.Value = translation.Value);
-        newRoot.With((ref Unity.Transforms.Rotation r) => r.Value = rotation.Value);
-        newRoot.With((ref TilePosition tp) => { tp.Tile = tilePos.Tile; tp.TileRotation = tilePos.TileRotation; tp.CompressedHeight = tilePos.CompressedHeight; });
-        if (newRoot.Has<TileBounds>())
-            newRoot.With((ref TileBounds tb) => tb.Value = tileBounds.Value);
-        // v0.9.0 (live-test fix): NEVER copy the old entity's StaticTransform INDEX —
-        // it references baked transform data that dies with the old entity, leaving
-        // the new stair unselectable/uneditable ("permanent object"). Use the
-        // dynamic-transform path instead, exactly how KindredSchematics places
-        // everything (their cursor drive sets UseStaticTransform=false).
-        if (newRoot.Has<StaticTransformCompatible>())
-            newRoot.With((ref StaticTransformCompatible s) =>
+        // ---- refund the old stair's cost (same as the new one's) so the vanilla
+        //      build charge nets zero. Abort BEFORE destroying if inventory is full.
+        var granted = new System.Collections.Generic.List<(PrefabGUID Item, int Amount)>();
+        if (Core.ServerGameManager.TryGetBuffer<BlueprintRequirementBuffer>(targetPrefab, out var reqs))
+        {
+            for (int i = 0; i < reqs.Length; i++)
             {
-                s.UseStaticTransform = false;
-                s.NonStaticTransform_Pos = new Unity.Mathematics.float2(translation.Value.x, translation.Value.z);
-                s.NonStaticTransform_Height = translation.Value.y;
-                s.NonStaticTransform_Rotation = tilePos.TileRotation;
-            });
+                var req = reqs[i];
+                if (req.Amount <= 0) continue;
+                if (!Core.ServerGameManager.TryAddInventoryItem(character, req.PrefabGUID, req.Amount))
+                {
+                    foreach (var g in granted) Core.ServerGameManager.TryRemoveInventoryItem(
+                        InventoryUtilities.TryGetInventoryEntity(Core.EntityManager, character, out Entity inv) ? inv : character,
+                        g.Item, g.Amount);
+                    message = $"Your inventory needs room for the swap materials ({req.Amount}× {req.PrefabGUID.GetPrefabName()}). Make space and retry.";
+                    return false;
+                }
+                granted.Add((req.PrefabGUID, req.Amount));
+            }
+        }
 
-        // ---- ownership (KindredSchematics SetOwnerForEntity shape) ----
-        newRoot.With((ref CastleHeartConnection c) => c.CastleHeartEntity = heartConn.CastleHeartEntity);
-        if (newRoot.Has<Team>())
-            newRoot.With((ref Team team) => { team.Value = teamData.TeamValue; team.FactionIndex = -1; });
-        if (newRoot.Has<TeamReference>())
-            newRoot.With((ref TeamReference tr) => tr.Value._Value = teamRefEntity);
-        if (newRoot.Has<UserOwner>())
-            newRoot.With((ref UserOwner uo) => uo = heartUserOwner);
-
-        // ---- destroy the old root ONLY (never walk attach-parents — that's
-        //      delete semantics and could destroy the floor it attaches to) ----
+        // ---- destroy the old root, then fire the game's own build event a few
+        //      frames later (the destroy must settle so the cell reads as free).
         DestroyUtility.Destroy(Core.EntityManager, oldRoot);
 
-        Core.Log.LogInfo($"[Uriel STAIRS] swapped {archetype} stair {fromStyle} → {toStyle} at tile ({tilePos.Tile.x},{tilePos.Tile.y}).");
-        message = $"Stair swapped: {fromStyle} → {toStyle} ({archetype}).";
+        Entity capturedChar = character, capturedUser = userEntity;
+        Tick.RunLater(3, () =>
+        {
+            try
+            {
+                Entity ev = Core.EntityManager.CreateEntity();
+                Core.EntityManager.AddComponentData(ev, new FromCharacter { User = capturedUser, Character = capturedChar });
+                Core.EntityManager.AddComponentData(ev, new NetworkEventType
+                {
+                    EventId = NetworkEvents.EventId_BuildTileModelEvent,
+                    IsAdminEvent = false,
+                    IsDebugEvent = false,
+                });
+                Core.EntityManager.AddComponent<ReceiveNetworkEventTag>(ev);
+                Core.EntityManager.AddComponentData(ev, new BuildTileModelEvent
+                {
+                    PrefabGuid = targetGuid,
+                    SpawnTranslation = new Unity.Transforms.Translation { Value = spawnPos },
+                    SpawnTileRotation = spawnRot,
+                    VariationIndex = 0,
+                    ResourceConsumeType = BuildResourceConsumeType.LocalInventory,
+                    RebuildUniqueKey = default,
+                });
+                Core.Log.LogInfo($"[Uriel STAIRS] build event fired: {archetype} {fromStyle} → {toStyle} at tile ({tile.x},{tile.y}).");
+            }
+            catch (Exception ex)
+            {
+                Core.Log.LogError($"[Uriel STAIRS] build event failed to create: {ex}");
+                ChatNotify.ToUserEntity(capturedUser, "[Uriel] Swap failed after removal — the materials are in your inventory; place the stair by hand. (Admin: check log.)");
+            }
+        });
+
+        // ---- verify placement; the refund means failure is never a loss ----
+        var verifyPos = spawnPos;
+        Tick.RunLater(45, () =>
+        {
+            try
+            {
+                Entity placed = ClosestStairTo(verifyPos, 2.5f, out _, out string placedStyle);
+                if (placed != Entity.Null && string.Equals(placedStyle, toStyle, StringComparison.OrdinalIgnoreCase))
+                {
+                    ChatNotify.ToUserEntity(capturedUser, $"[Uriel] Stair swapped: {fromStyle} → {toStyle}.");
+                    Core.Log.LogInfo("[Uriel STAIRS] swap verified — vanilla placement succeeded.");
+                }
+                else
+                {
+                    ChatNotify.ToUserEntity(capturedUser, "[Uriel] The game refused the placement — the old stair's materials are in your inventory; place the new style by hand from the build menu.");
+                    Core.Log.LogWarning($"[Uriel STAIRS] swap verify: no {toStyle} stair found at the spot (found: {(placed == Entity.Null ? "nothing" : placedStyle)}). Player keeps the refund.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Core.Log.LogError($"[Uriel STAIRS] swap verify failed: {ex}");
+            }
+        });
+
+        message = $"Swapping {fromStyle} → {toStyle} ({archetype})…";
         return true;
     }
 
