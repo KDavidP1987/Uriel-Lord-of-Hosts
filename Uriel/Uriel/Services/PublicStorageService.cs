@@ -16,18 +16,20 @@ namespace Uriel.Services;
 /// Per-container public sharing — the mod's first feature (see
 /// docs/features/PUBLIC_STORAGE.md).
 ///
-/// MECHANISM (team-swap): vanilla decides container access from the RUNTIME
-/// Team/TeamReference assigned at placement (the castle's team). World chests
-/// keep a neutral team, which is why anyone can open them — and Team replicates
-/// to clients, so the open prompt follows automatically. Sharing copies a live
-/// world chest's Team/TeamReference onto the container ("neutral donor");
-/// unsharing restores the team from the container's own CastleHeartConnection →
-/// castle heart. Nothing about the original team needs persisting — the heart
-/// is always the authoritative restore source.
+/// MECHANISM (v0.8.0 — full neutral recipe, after live testing proved a team
+/// change alone is NOT enough): the client gates the interact prompt on the
+/// container being an (enemy) CASTLE container, so with the typical
+/// CanLootEnemyContainers=false server setting a team-swapped chest stayed
+/// unclickable. Sharing now applies the complete KindredSchematics
+/// public-build recipe: Team/TeamReference ← the game's NeutralTeam singleton
+/// AND CastleHeartConnection ← Entity.Null. Because the heart link is severed
+/// while shared, the heart is remembered in the registry entry by its TILE
+/// (HasHeartTile/HeartTileX/Y) for ownership checks (IsController) and
+/// unshare-restore (reconnect + sibling-team restore).
 ///
 /// PERSISTENCE: registry entries are keyed by prefab GUID + TilePosition tile
 /// coords (stable across save/load; entity ids and NetworkIds are not). The
-/// neutral team is re-applied to registered containers at every server init.
+/// neutral state is re-applied to registered containers at every server init.
 /// Limitation (documented): moving a shared container via castle edit changes
 /// its tile and strands the entry — it simply reverts to private on restart.
 /// </summary>
@@ -41,6 +43,14 @@ internal sealed class PublicStorageService
         public string ContainerClass { get; set; } = "storage"; // "storage" | "prison" (prison not yet implemented)
         public ulong SharedBySteamId { get; set; }
         public string SharedAtUtc { get; set; }
+
+        // ---- castle heart anchor (v0.8.0) ----
+        // While shared, the container's CastleHeartConnection is SEVERED (the
+        // client gates the interact prompt on it), so the heart is remembered
+        // here by its tile for ownership checks and unshare-restore.
+        public bool HasHeartTile { get; set; }
+        public int HeartTileX { get; set; }
+        public int HeartTileY { get; set; }
 
         // ---- policy modifiers (schema v2) ----
         /// <summary>"take" (withdraw only) | "give" (donation box) | "givetake" (both, default).</summary>
@@ -101,6 +111,7 @@ internal sealed class PublicStorageService
     bool _donorResolved;
     Team _donorTeam;
     Entity _donorTeamRefEntity;
+    Entity _neutralTeamEntity; // the game's NeutralTeam singleton (preferred public-team source, v0.8.0)
 
     static string SaveDir => Path.Combine(BepInEx.Paths.ConfigPath, "Uriel");
     static string SavePath => Path.Combine(SaveDir, "public_containers.json");
@@ -278,33 +289,149 @@ internal sealed class PublicStorageService
         return false;
     }
 
-    void ApplyPublicTeam(Entity container)
+    /// <summary>The game's NeutralTeam singleton entity (KindredSchematics' public-build team source).</summary>
+    bool TryResolveNeutralTeamEntity(out Entity neutralTeam)
     {
-        var donorTeam = _donorTeam;
-        var donorRef = _donorTeamRefEntity;
-        container.With((ref Team t) => { t.Value = donorTeam.Value; t.FactionIndex = donorTeam.FactionIndex; });
-        container.With((ref TeamReference tr) => tr.Value._Value = donorRef);
+        if (_neutralTeamEntity.Exists()) { neutralTeam = _neutralTeamEntity; return true; }
+        neutralTeam = Entity.Null;
+        var builder = new EntityQueryBuilder(Allocator.Temp)
+            .AddAll(new(Il2CppType.Of<NeutralTeam>(), ComponentType.AccessMode.ReadOnly))
+            .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
+        var query = Core.EntityManager.CreateEntityQuery(ref builder);
+        var entities = query.ToEntityArray(Allocator.Temp);
+        try
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                if (!entities[i].Has<TeamData>()) continue;
+                _neutralTeamEntity = entities[i];
+                neutralTeam = entities[i];
+                if (Settings.VerboseLogging.Value)
+                    Core.Log.LogInfo($"[Uriel SHARE] NeutralTeam singleton resolved: {entities[i]}.");
+                return true;
+            }
+        }
+        finally
+        {
+            entities.Dispose();
+        }
+        return false;
+    }
+
+    public bool CanResolvePublicTeam() =>
+        TryResolveNeutralTeamEntity(out _) || TryResolveDonorTeam();
+
+    /// <summary>
+    /// Make the container PUBLIC (v0.8.0 — full KindredSchematics neutral recipe):
+    ///  1. remember the castle heart by tile (entry) — connection is about to go;
+    ///  2. Team/TeamReference ← the game's NeutralTeam singleton (fallback: a
+    ///     world chest's team);
+    ///  3. CastleHeartConnection ← Entity.Null. Live testing (2026-06-07) proved a
+    ///     team change ALONE leaves the chest "an enemy castle container" — the
+    ///     client refuses the interact prompt when CanLootEnemyContainers is off.
+    /// </summary>
+    void ApplyPublicTeam(Entity container, PublicContainerEntry entry)
+    {
+        // 1. capture the heart anchor while the connection still exists
+        if (container.TryGetComponent<CastleHeartConnection>(out var conn))
+        {
+            Entity heart = conn.CastleHeartEntity.GetEntityOnServer();
+            if (heart.Exists() && heart.TryGetComponent<TilePosition>(out var heartTile))
+            {
+                entry.HasHeartTile = true;
+                entry.HeartTileX = heartTile.Tile.x;
+                entry.HeartTileY = heartTile.Tile.y;
+            }
+        }
+
+        // 2. neutral team
+        if (TryResolveNeutralTeamEntity(out Entity neutralTeam)
+            && neutralTeam.TryGetComponent<TeamData>(out var teamData))
+        {
+            container.With((ref Team t) => { t.Value = teamData.TeamValue; t.FactionIndex = -1; });
+            container.With((ref TeamReference tr) => tr.Value._Value = neutralTeam);
+        }
+        else if (TryResolveDonorTeam())
+        {
+            var donorTeam = _donorTeam;
+            var donorRef = _donorTeamRefEntity;
+            container.With((ref Team t) => { t.Value = donorTeam.Value; t.FactionIndex = donorTeam.FactionIndex; });
+            container.With((ref TeamReference tr) => tr.Value._Value = donorRef);
+        }
+
+        // 3. sever the castle link (the client-side gate)
+        if (container.Has<CastleHeartConnection>())
+            container.With((ref CastleHeartConnection c) => c.CastleHeartEntity = Entity.Null);
     }
 
     /// <summary>
-    /// Restore the container's team on unshare. Preferred donor: a SIBLING private
-    /// container on the same castle heart (exactly the team a placed chest should
-    /// carry); fallback: the castle heart itself. Logs what was restored.
+    /// The castle heart governing a container: via its live connection when
+    /// present, else via the heart tile remembered in the registry entry
+    /// (shared containers have a severed connection).
     /// </summary>
-    bool RestoreCastleTeam(Entity container, out string error)
+    Entity ResolveHeartFor(Entity container, PublicContainerEntry entry)
+    {
+        if (container.TryGetComponent<CastleHeartConnection>(out var conn))
+        {
+            Entity heart = conn.CastleHeartEntity.GetEntityOnServer();
+            if (heart.Exists()) return heart;
+        }
+        if (entry is not null && entry.HasHeartTile)
+            return FindHeartByTile(entry.HeartTileX, entry.HeartTileY);
+        return Entity.Null;
+    }
+
+    static Entity FindHeartByTile(int x, int y)
+    {
+        var builder = new EntityQueryBuilder(Allocator.Temp)
+            .AddAll(new(Il2CppType.Of<CastleHeart>(), ComponentType.AccessMode.ReadOnly))
+            .AddAll(new(Il2CppType.Of<TilePosition>(), ComponentType.AccessMode.ReadOnly))
+            .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
+        var query = Core.EntityManager.CreateEntityQuery(ref builder);
+        var entities = query.ToEntityArray(Allocator.Temp);
+        try
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                if (!entities[i].TryGetComponent<TilePosition>(out var tile)) continue;
+                if (tile.Tile.x == x && tile.Tile.y == y) return entities[i];
+            }
+        }
+        finally
+        {
+            entities.Dispose();
+        }
+        return Entity.Null;
+    }
+
+    /// <summary>Does this character's team control the container's castle (works for SHARED containers via the heart anchor)?</summary>
+    public bool IsController(Entity character, Entity container, PublicContainerEntry entry)
+    {
+        Entity heart = ResolveHeartFor(container, entry);
+        if (!heart.TryGetComponent<Team>(out var heartTeam)) return false;
+        if (!character.TryGetComponent<Team>(out var charTeam)) return false;
+        return charTeam.Value == heartTeam.Value;
+    }
+
+    /// <summary>
+    /// Restore the container on unshare (v0.8.0): RECONNECT the castle heart
+    /// (resolved via the live connection or the registry's heart anchor), then
+    /// restore the team — preferred donor: a sibling private container on the
+    /// same heart; fallback: the heart itself. Logs what was restored.
+    /// </summary>
+    bool RestoreCastleTeam(Entity container, PublicContainerEntry entry, out string error)
     {
         error = null;
-        if (!container.TryGetComponent<CastleHeartConnection>(out var conn))
-        {
-            error = "Container has no castle heart connection; cannot restore its team.";
-            return false;
-        }
-        Entity heart = conn.CastleHeartEntity.GetEntityOnServer();
+        Entity heart = ResolveHeartFor(container, entry);
         if (!heart.Exists())
         {
-            error = "Castle heart not found; cannot restore.";
+            error = "Castle heart not found (was the castle destroyed?); cannot restore.";
             return false;
         }
+
+        // Reconnect the heart link severed while shared.
+        if (container.Has<CastleHeartConnection>())
+            container.With((ref CastleHeartConnection c) => c.CastleHeartEntity = heart);
 
         // Preferred donor: sibling private container on the same heart.
         Entity donor = FindSiblingTeamDonor(container, heart);
@@ -319,7 +446,7 @@ internal sealed class PublicStorageService
         var refEntity = donorRef.Value._Value;
         container.With((ref Team t) => { t.Value = donorTeam.Value; t.FactionIndex = donorTeam.FactionIndex; });
         container.With((ref TeamReference tr) => tr.Value._Value = refEntity);
-        Core.Log.LogInfo($"[Uriel SHARE] unshare: restored team on {container.GetPrefabGuid().GetPrefabName()} from {(donor == heart ? "castle heart" : "sibling container")} (Team.Value={donorTeam.Value}).");
+        Core.Log.LogInfo($"[Uriel SHARE] unshare: reconnected heart + restored team on {container.GetPrefabGuid().GetPrefabName()} from {(donor == heart ? "castle heart" : "sibling container")} (Team.Value={donorTeam.Value}).");
         return true;
     }
 
@@ -404,7 +531,7 @@ internal sealed class PublicStorageService
             message = "That container is already public.";
             return false;
         }
-        if (!TryResolveDonorTeam())
+        if (!CanResolvePublicTeam())
         {
             message = "Sharing unavailable: no neutral team source found on this map (see server log).";
             return false;
@@ -415,8 +542,7 @@ internal sealed class PublicStorageService
             return false;
         }
 
-        ApplyPublicTeam(container);
-        _entries.Add(new PublicContainerEntry
+        var newEntry = new PublicContainerEntry
         {
             PrefabGuid = container.GetPrefabGuid()._Value,
             TileX = tile.Tile.x,
@@ -424,7 +550,9 @@ internal sealed class PublicStorageService
             ContainerClass = cls,
             SharedBySteamId = character.GetSteamId(),
             SharedAtUtc = DateTime.UtcNow.ToString("u"),
-        });
+        };
+        ApplyPublicTeam(container, newEntry); // captures the heart anchor into the entry
+        _entries.Add(newEntry);
         SaveSync();
         message = cls == "prison"
             ? $"{container.GetPrefabGuid().GetPrefabName()} is now PUBLIC — anyone can tend the prisoner (feed, extract blood) or charm them out as their own subdued follower. '.uriel unshare' to revert."
@@ -440,15 +568,15 @@ internal sealed class PublicStorageService
             message = "That container isn't currently public.";
             return false;
         }
-        if (!isAdmin && !CharacterControlsContainer(character, container)
+        if (!isAdmin && !IsController(character, container, entry)
             && character.GetSteamId() != entry.SharedBySteamId)
         {
             message = "Only the container's controllers (or the original sharer / an admin) can unshare it.";
             return false;
         }
-        if (!RestoreCastleTeam(container, out string err))
+        if (!RestoreCastleTeam(container, entry, out string err))
         {
-            message = $"Could not restore the container's team: {err}";
+            message = $"Could not restore the container: {err}";
             return false;
         }
         _entries.Remove(entry);
@@ -470,10 +598,10 @@ internal sealed class PublicStorageService
         {
             var container = ResolveEntry(entry);
             bool mine = entry.SharedBySteamId == steamId
-                || (container != Entity.Null && CharacterControlsContainer(character, container));
+                || (container != Entity.Null && IsController(character, container, entry));
             if (!mine) continue;
             if (container == Entity.Null) { _entries.Remove(entry); purged++; continue; }
-            if (RestoreCastleTeam(container, out _)) restored++;
+            if (RestoreCastleTeam(container, entry, out _)) restored++;
             _entries.Remove(entry);
         }
         SaveSync();
@@ -489,7 +617,7 @@ internal sealed class PublicStorageService
             if (entry.SharedBySteamId != steamId) continue;
             var container = ResolveEntry(entry);
             if (container == Entity.Null) { _entries.Remove(entry); purged++; continue; }
-            if (RestoreCastleTeam(container, out _)) restored++;
+            if (RestoreCastleTeam(container, entry, out _)) restored++;
             _entries.Remove(entry);
         }
         SaveSync();
@@ -517,7 +645,7 @@ internal sealed class PublicStorageService
         {
             var container = ResolveEntry(entry);
             if (container == Entity.Null) { unresolved++; _entries.Remove(entry); continue; }
-            if (RestoreCastleTeam(container, out _)) restored++;
+            if (RestoreCastleTeam(container, entry, out _)) restored++;
             _entries.Remove(entry);
         }
         SaveSync();
@@ -574,9 +702,9 @@ internal sealed class PublicStorageService
             Core.Log.LogInfo($"[Uriel SHARE] PublicStorage disabled in config; {_entries.Count} share(s) NOT applied (containers stay private).");
             return;
         }
-        if (!TryResolveDonorTeam())
+        if (!CanResolvePublicTeam())
         {
-            Core.Log.LogWarning($"[Uriel SHARE] cannot re-apply {_entries.Count} share(s): no neutral team donor.");
+            Core.Log.LogWarning($"[Uriel SHARE] cannot re-apply {_entries.Count} share(s): no neutral team source.");
             return;
         }
         int applied = 0, missing = 0;
@@ -584,9 +712,10 @@ internal sealed class PublicStorageService
         {
             var container = ResolveEntry(entry);
             if (container == Entity.Null) { missing++; continue; }
-            ApplyPublicTeam(container);
+            ApplyPublicTeam(container, entry); // also (re)captures the heart anchor when the save restored the connection
             applied++;
         }
+        SaveSync(); // persist any newly-captured heart anchors (entries from pre-v0.8.0 builds)
         Core.Log.LogInfo($"[Uriel SHARE] re-applied public team to {applied} container(s); {missing} entry(ies) did not resolve (kept; '.uriel unshareall' to purge).");
     }
 
@@ -600,7 +729,7 @@ internal sealed class PublicStorageService
         if (entry is not null)
         {
             // Policy edits require control (or being the original sharer); admins override.
-            if (!isAdmin && !CharacterControlsContainer(character, container) && character.GetSteamId() != entry.SharedBySteamId)
+            if (!isAdmin && !IsController(character, container, entry) && character.GetSteamId() != entry.SharedBySteamId)
             {
                 entry = null;
                 error = "You don't control this container, so you can't change its sharing policy.";
@@ -830,7 +959,7 @@ internal sealed class PublicStorageService
         // ---- WITHDRAW from a public container ----
         if (fromEntry is not null)
         {
-            if (CharacterControlsContainer(character, fromContainer)) return; // controllers bypass
+            if (IsController(character, fromContainer, fromEntry)) return; // controllers bypass
             if (fromEntry.Permission == "give")
             {
                 Deny(eventEntity, userEntity, "This container is a DONATION BOX — you can put items in, not take them.");
@@ -854,7 +983,7 @@ internal sealed class PublicStorageService
         // ---- DEPOSIT into a public container ----
         if (toEntry is not null)
         {
-            bool controller = CharacterControlsContainer(character, toContainer);
+            bool controller = IsController(character, toContainer, toEntry);
             if (!controller && toEntry.Permission == "take")
             {
                 Deny(eventEntity, userEntity, "This container is TAKE-ONLY — you can't put items into it.");
@@ -1000,11 +1129,12 @@ internal sealed class PublicStorageService
         var shared = ResolveEntry(entry);
         if (shared != Entity.Null && IsGeneralStorage(shared) && CountFit(shared, costItem) >= amount) return shared;
 
+        Entity sharedHeart = shared != Entity.Null ? ResolveHeartFor(shared, entry) : Entity.Null;
         if (shared != Entity.Null
-            && shared.TryGetComponent<CastleHeartConnection>(out var conn)
+            && sharedHeart.Exists()
             && shared.TryGetComponent<Unity.Transforms.Translation>(out var sharedPos))
         {
-            Entity heart = conn.CastleHeartEntity.GetEntityOnServer();
+            Entity heart = sharedHeart;
             var builder = new EntityQueryBuilder(Allocator.Temp)
                 .AddAll(new(Il2CppType.Of<InventoryOwner>(), ComponentType.AccessMode.ReadOnly))
                 .AddAll(new(Il2CppType.Of<TilePosition>(), ComponentType.AccessMode.ReadOnly))
@@ -1167,7 +1297,7 @@ internal sealed class PublicStorageService
         entry ??= toContainer.Exists() ? FindEntry(toContainer) : null;
         if (entry is null) return;
         Entity publicContainer = FindEntry(fromContainer) is not null ? fromContainer : toContainer;
-        if (CharacterControlsContainer(fromChar.Character, publicContainer)) return;
+        if (IsController(fromChar.Character, publicContainer, entry)) return;
         if (!entry.HasRestrictions) return;
         Deny(eventEntity, fromChar.User, "This container has sharing rules — move items one at a time.");
     }

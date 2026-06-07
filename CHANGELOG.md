@@ -8,6 +8,33 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.8.0] - 2026-06-07
+
+### Fixed — sharing now works regardless of server loot settings
+- **Shared containers/cells were unclickable for strangers when the server's
+  "can loot enemy containers" setting was OFF** (the typical PvP/PvE
+  configuration) — live two-player test. Root cause: the client gates the
+  interact prompt on the container being an enemy CASTLE container; a team
+  change alone doesn't clear that. (Retrospective: the earlier "open+take
+  worked" result was the permissive server setting, not our team swap.)
+- Sharing now applies the complete neutral recipe (KindredSchematics'
+  public-build pattern): `Team`/`TeamReference` from the game's
+  **NeutralTeam singleton** AND **`CastleHeartConnection` severed** while
+  shared. This is what makes KindredSchematics-built public chests work on
+  any server, independent of loot settings.
+- Because the castle link is severed while shared, each entry now records a
+  **castle-heart anchor** (heart tile) for ownership checks and restore:
+  unshare reconnects the heart and restores the sibling/heart team. Existing
+  entries auto-capture their anchor at the next server start.
+- Ownership checks (`unshare`, policy edits, controller bypass in the
+  movement patches, payment routing) all resolve the heart via the anchor
+  while shared.
+
+### Known considerations (to validate)
+- A shared (heart-severed) container is invisible to castle decay while
+  shared; unshare reconnects it. Prison-cell sharing may interact with the
+  per-castle prison-cell limit while severed.
+
 ## [0.7.0] - 2026-06-07
 
 ### Added — stair hot-swap (experimental, first implementation)

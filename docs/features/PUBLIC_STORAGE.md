@@ -73,7 +73,28 @@ gain policy fields + per-player usage; file gains a `PayChests` map
 `[PublicStorage] PrisonEnabled` (default `true`, prison not yet implemented),
 `[PublicStorage] MaxTargetDistance` (default `5`)
 
-## Implementation decision (v0.2.0)
+## Mechanism revision (v0.8.0) — the team swap alone was NOT the fix
+
+Two-player test with `CanLootEnemyContainers=false` (the typical server
+setting): shared chest AND cell completely unclickable for the stranger — no
+interact prompt at all. The client gates the prompt on "is this an enemy
+CASTLE container", keyed on the castle link, and only replicated state can
+change client behavior. Retrospective: the v0.2.1 "open+take works" result
+was the permissive server setting, not our team swap.
+
+**v0.8.0 recipe (KindredSchematics public-build pattern, complete):**
+1. `Team`/`TeamReference` ← the game's **NeutralTeam singleton** entity
+   (queried by the `NeutralTeam` component, IncludeDisabled).
+2. **`CastleHeartConnection.CastleHeartEntity = Entity.Null`** while shared.
+3. Registry entry stores a **heart anchor** (the heart's tile coords) so
+   ownership checks (`IsController`) and unshare-restore work while the link
+   is severed; unshare reconnects the heart + restores the sibling/heart team.
+4. Re-apply at boot also re-captures anchors for pre-v0.8.0 entries.
+
+Open considerations: decay behavior of heart-severed containers while
+shared; per-castle prison-cell limit accounting while a cell is severed.
+
+## Implementation decision (v0.2.0 — superseded by v0.8.0 above)
 
 Went with a refined **Approach B (team-swap)** rather than validation patches,
 after the prefab comparison showed castle stashes and world chests carry

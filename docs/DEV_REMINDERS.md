@@ -54,6 +54,20 @@ belongs here: things that bit once and must not bite twice.
 
 ## Lessons learned (append below as they happen)
 
+- **2026-06-07 (v0.8.0) — a Team swap alone does not make a castle container
+  public; the client gates on the CASTLE LINK.** With the common
+  `CanLootEnemyContainers=false` server setting, a container whose
+  Team/TeamReference were neutralized but whose `CastleHeartConnection` was
+  intact stayed completely unclickable for strangers (no interact prompt —
+  the client never sends anything, so no server patch can help). The earlier
+  "open+take worked" test result was actually the permissive server setting
+  doing the work, not the team swap. The complete neutral recipe
+  (KindredSchematics): NeutralTeam-singleton Team/TeamReference **AND**
+  `CastleHeartConnection = Entity.Null`. Corollary: anything severed for
+  sharing must be re-derivable for restore — hence the heart-tile anchor in
+  the registry. Always ask which side enforces a rule: if it's the client,
+  only replicated STATE changes work, never server patches.
+
 - **2026-06-06 (v0.4.1) — the tile entity is NOT the inventory carrier.**
   Placed containers keep their items on a separate attached external-inventory
   entity (`InventoryInstanceElement.ExternalInventoryEntityPrefabGuid →

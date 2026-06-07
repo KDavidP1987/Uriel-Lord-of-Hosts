@@ -3,6 +3,13 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.8.0 (2026-06-07)
+
+- Fix: shared chests/prison cells are now accessible to other players even
+  when the server's "loot enemy containers" setting is OFF (the usual
+  configuration). Shares survive restarts; unsharing fully restores the
+  container to its castle.
+
 ## 0.7.0 (2026-06-07)
 
 - STAIR HOT-SWAP (experimental): aim at a staircase and `.uriel stairswap
