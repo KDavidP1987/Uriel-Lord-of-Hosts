@@ -8,6 +8,34 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.9.0] - 2026-06-07
+
+### Fixed — storage shares now take effect live; stairs stay editable
+- **Sharing a chest no longer requires the other player to restart their
+  game** (live test: unshare propagated, share didn't — "locked" being the
+  stale-state default made unshare only LOOK instant). Clients re-evaluate a
+  container only when they receive a NEW entity, so share/unshare of storage
+  now REBUILDS the container: fresh entity with the target state, transform/
+  tile data copied, every inventory slot transferred with its item entity
+  re-pointed (durability preserved), old container destroyed. Rollback keeps
+  the old container intact if the rebuild can't complete. Prison cells keep
+  the mutate+blink path (rebuilding a cell with a bound prisoner is unsafe).
+- **Swapped stairs no longer become permanent/uneditable.** Root cause: the
+  swap copied the old entity's `StaticTransformCompatible.StaticTransform`
+  INDEX — baked transform data that dies with the old entity. The swap (and
+  the container rebuild) now use the dynamic-transform path
+  (`UseStaticTransform=false` + NonStaticTransform fields), exactly how
+  KindredSchematics places everything. **Fix for already-stuck stairs:**
+  swap them to another style with this build — the rebuild replaces the
+  broken entity with a correct one.
+
+### Known issue (parked, by design decision pending)
+- Prison cells: strangers can use the cell's inventory/recipes but get no
+  SUBDUE/charm option even with fresh state — the prisoner-management UI
+  appears to require more than team identity (likely the castle link, which
+  sharing severs). Next iteration will likely add a server-side
+  `.uriel takeprisoner` command instead of chasing the client UI.
+
 ## [0.8.2] - 2026-06-07
 
 ### Fixed — the client-refresh mechanism, properly this time

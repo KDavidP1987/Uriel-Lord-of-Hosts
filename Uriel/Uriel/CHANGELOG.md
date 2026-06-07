@@ -3,6 +3,15 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.9.0 (2026-06-07)
+
+- Fix: sharing a chest now takes effect immediately for online players — no
+  game restart needed (chest contents are fully preserved through the change).
+- Fix: swapped stairs stay selectable/editable. Already-stuck stairs from the
+  previous build: swap them once more with this version to repair them.
+- Known issue: prisoners in shared cells can be fed/extracted but not yet
+  subdued by others — a dedicated command is planned.
+
 ## 0.8.2 (2026-06-07)
 
 - Fix: share/unshare really does take effect immediately for online players

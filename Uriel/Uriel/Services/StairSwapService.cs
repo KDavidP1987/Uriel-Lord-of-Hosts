@@ -284,7 +284,6 @@ internal sealed class StairSwapService
             return false;
         }
         oldRoot.TryGetComponent<TileBounds>(out var tileBounds);
-        bool hasStc = oldRoot.TryGetComponent<StaticTransformCompatible>(out var stc);
 
         Entity heart = heartConn.CastleHeartEntity.GetEntityOnServer();
         if (!heart.Exists() || !heart.TryGetComponent<TeamReference>(out var heartTeamRef))
@@ -313,14 +312,18 @@ internal sealed class StairSwapService
         newRoot.With((ref TilePosition tp) => { tp.Tile = tilePos.Tile; tp.TileRotation = tilePos.TileRotation; tp.CompressedHeight = tilePos.CompressedHeight; });
         if (newRoot.Has<TileBounds>())
             newRoot.With((ref TileBounds tb) => tb.Value = tileBounds.Value);
-        if (hasStc && newRoot.Has<StaticTransformCompatible>())
+        // v0.9.0 (live-test fix): NEVER copy the old entity's StaticTransform INDEX —
+        // it references baked transform data that dies with the old entity, leaving
+        // the new stair unselectable/uneditable ("permanent object"). Use the
+        // dynamic-transform path instead, exactly how KindredSchematics places
+        // everything (their cursor drive sets UseStaticTransform=false).
+        if (newRoot.Has<StaticTransformCompatible>())
             newRoot.With((ref StaticTransformCompatible s) =>
             {
-                s.UseStaticTransform = stc.UseStaticTransform;
-                s.StaticTransform = stc.StaticTransform;
-                s.NonStaticTransform_Pos = stc.NonStaticTransform_Pos;
-                s.NonStaticTransform_Height = stc.NonStaticTransform_Height;
-                s.NonStaticTransform_Rotation = stc.NonStaticTransform_Rotation;
+                s.UseStaticTransform = false;
+                s.NonStaticTransform_Pos = new Unity.Mathematics.float2(translation.Value.x, translation.Value.z);
+                s.NonStaticTransform_Height = translation.Value.y;
+                s.NonStaticTransform_Rotation = tilePos.TileRotation;
             });
 
         // ---- ownership (KindredSchematics SetOwnerForEntity shape) ----

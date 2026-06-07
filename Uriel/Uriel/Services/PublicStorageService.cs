@@ -5,6 +5,7 @@ using System.Text.Json;
 using Il2CppInterop.Runtime;
 using ProjectM;
 using ProjectM.CastleBuilding;
+using ProjectM.Shared;
 using Stunlock.Core;
 using Unity.Collections;
 using Unity.Entities;
@@ -388,9 +389,9 @@ internal sealed class PublicStorageService
     ///     team change ALONE leaves the chest "an enemy castle container" — the
     ///     client refuses the interact prompt when CanLootEnemyContainers is off.
     /// </summary>
-    void ApplyPublicTeam(Entity container, PublicContainerEntry entry)
+    /// <summary>Remember the container's castle heart (by tile) in the entry while its connection is still intact.</summary>
+    void CaptureHeartAnchor(Entity container, PublicContainerEntry entry)
     {
-        // 1. capture the heart anchor while the connection still exists
         if (container.TryGetComponent<CastleHeartConnection>(out var conn))
         {
             Entity heart = conn.CastleHeartEntity.GetEntityOnServer();
@@ -401,6 +402,12 @@ internal sealed class PublicStorageService
                 entry.HeartTileY = heartTile.Tile.y;
             }
         }
+    }
+
+    void ApplyPublicTeam(Entity container, PublicContainerEntry entry)
+    {
+        // 1. capture the heart anchor while the connection still exists
+        CaptureHeartAnchor(container, entry);
 
         // 2. neutral team
         if (TryGetPublicTeam(out int teamValue, out int factionIndex, out Entity teamRefEntity))
@@ -480,6 +487,14 @@ internal sealed class PublicStorageService
         if (!heart.TryGetComponent<Team>(out var heartTeam)) return false;
         if (!character.TryGetComponent<Team>(out var charTeam)) return false;
         return charTeam.Value == heartTeam.Value;
+    }
+
+    /// <summary>Route to the right restore for the container class (v0.9.0): storage rebuilds (fresh entity → clients refresh); prison cells mutate + blink.</summary>
+    bool RestoreToPrivate(Entity container, PublicContainerEntry entry, out string error)
+    {
+        if (entry.ContainerClass == "storage")
+            return RebuildContainer(container, entry, makePublic: false, out error);
+        return RestoreCastleTeam(container, entry, out error);
     }
 
     /// <summary>
@@ -636,7 +651,21 @@ internal sealed class PublicStorageService
             SharedBySteamId = character.GetSteamId(),
             SharedAtUtc = DateTime.UtcNow.ToString("u"),
         };
-        ApplyPublicTeam(container, newEntry); // captures the heart anchor into the entry
+        CaptureHeartAnchor(container, newEntry);
+        if (cls == "storage")
+        {
+            // v0.9.0: REBUILD as a fresh entity — the only thing that reliably makes
+            // connected clients re-evaluate interactability (mutate+blink wasn't enough).
+            if (!RebuildContainer(container, newEntry, makePublic: true, out string rbErr))
+            {
+                message = $"Sharing failed: {rbErr}";
+                return false;
+            }
+        }
+        else
+        {
+            ApplyPublicTeam(container, newEntry); // prison cells: mutate + blink (rebuild is unsafe with a prisoner bound)
+        }
         _entries.Add(newEntry);
         SaveSync();
         Core.Log.LogInfo($"[Uriel SHARE] shared {container.GetPrefabGuid().GetPrefabName()} at ({tile.Tile.x},{tile.Tile.y}) class={cls} by {character.GetSteamId()}.");
@@ -660,7 +689,7 @@ internal sealed class PublicStorageService
             message = "Only the container's controllers (or the original sharer / an admin) can unshare it.";
             return false;
         }
-        if (!RestoreCastleTeam(container, entry, out string err))
+        if (!RestoreToPrivate(container, entry, out string err))
         {
             message = $"Could not restore the container: {err}";
             return false;
@@ -687,7 +716,7 @@ internal sealed class PublicStorageService
                 || (container != Entity.Null && IsController(character, container, entry));
             if (!mine) continue;
             if (container == Entity.Null) { _entries.Remove(entry); purged++; continue; }
-            if (RestoreCastleTeam(container, entry, out _)) restored++;
+            if (RestoreToPrivate(container, entry, out _)) restored++;
             _entries.Remove(entry);
         }
         SaveSync();
@@ -703,7 +732,7 @@ internal sealed class PublicStorageService
             if (entry.SharedBySteamId != steamId) continue;
             var container = ResolveEntry(entry);
             if (container == Entity.Null) { _entries.Remove(entry); purged++; continue; }
-            if (RestoreCastleTeam(container, entry, out _)) restored++;
+            if (RestoreToPrivate(container, entry, out _)) restored++;
             _entries.Remove(entry);
         }
         SaveSync();
@@ -731,7 +760,7 @@ internal sealed class PublicStorageService
         {
             var container = ResolveEntry(entry);
             if (container == Entity.Null) { unresolved++; _entries.Remove(entry); continue; }
-            if (RestoreCastleTeam(container, entry, out _)) restored++;
+            if (RestoreToPrivate(container, entry, out _)) restored++;
             _entries.Remove(entry);
         }
         SaveSync();
@@ -1004,6 +1033,155 @@ internal sealed class PublicStorageService
             else sb.AppendLine("Prisoner: none/empty cell");
         }
         return sb.ToString().TrimEnd();
+    }
+
+    // ================================================================ container rebuild (v0.9.0)
+
+    /// <summary>
+    /// Rebuild a storage container as a FRESH entity with the desired sharing
+    /// state (v0.9.0): live testing proved clients only re-evaluate a container's
+    /// interactability when they receive a NEW entity — mutating the live one
+    /// (even with a Disabled blink) left strangers locked out until they
+    /// restarted their game. The rebuild: instantiate the same prefab, copy
+    /// transform/tile data, apply the target team state, transfer every
+    /// inventory slot (preserving item entities), destroy the old container.
+    /// Prison cells are NOT rebuilt (the prisoner binding makes that unsafe) —
+    /// they keep the mutate+blink path.
+    /// </summary>
+    bool RebuildContainer(Entity oldC, PublicContainerEntry entry, bool makePublic, out string error)
+    {
+        error = null;
+        if (!oldC.TryGetComponent<Unity.Transforms.Translation>(out var translation)
+            || !oldC.TryGetComponent<Unity.Transforms.Rotation>(out var rotation)
+            || !oldC.TryGetComponent<TilePosition>(out var tilePos))
+        {
+            error = "Container is missing placement data and can't be rebuilt.";
+            return false;
+        }
+        oldC.TryGetComponent<TileBounds>(out var tileBounds);
+        var prefabGuid = oldC.GetPrefabGuid();
+        if (!Core.PrefabCollectionSystem._PrefabLookupMap.TryGetValue(prefabGuid, out Entity prefab))
+        {
+            error = "Container prefab not found.";
+            return false;
+        }
+
+        Entity heart = ResolveHeartFor(oldC, entry);
+        Entity newC = Core.EntityManager.Instantiate(prefab);
+
+        // transform/tile (dynamic-transform path — never copy a StaticTransform index)
+        newC.With((ref Unity.Transforms.Translation t) => t.Value = translation.Value);
+        newC.With((ref Unity.Transforms.Rotation r) => r.Value = rotation.Value);
+        newC.With((ref TilePosition tp) => { tp.Tile = tilePos.Tile; tp.TileRotation = tilePos.TileRotation; tp.CompressedHeight = tilePos.CompressedHeight; });
+        if (newC.Has<TileBounds>())
+            newC.With((ref TileBounds tb) => tb.Value = tileBounds.Value);
+        if (newC.Has<StaticTransformCompatible>())
+            newC.With((ref StaticTransformCompatible s) =>
+            {
+                s.UseStaticTransform = false;
+                s.NonStaticTransform_Pos = new Unity.Mathematics.float2(translation.Value.x, translation.Value.z);
+                s.NonStaticTransform_Height = translation.Value.y;
+                s.NonStaticTransform_Rotation = tilePos.TileRotation;
+            });
+
+        // team state
+        if (makePublic)
+        {
+            if (TryGetPublicTeam(out int teamValue, out int factionIndex, out Entity teamRefEntity))
+            {
+                newC.With((ref Team t) => { t.Value = teamValue; t.FactionIndex = factionIndex; });
+                newC.With((ref TeamReference tr) => tr.Value._Value = teamRefEntity);
+            }
+            if (newC.Has<CastleHeartConnection>())
+                newC.With((ref CastleHeartConnection c) => c.CastleHeartEntity = Entity.Null);
+            if (heart.Exists() && heart.TryGetComponent<UserOwner>(out var heartOwner) && newC.Has<UserOwner>())
+                newC.With((ref UserOwner uo) => uo = heartOwner);
+        }
+        else
+        {
+            if (!heart.Exists())
+            {
+                DestroyUtility.Destroy(Core.EntityManager, newC);
+                error = "Castle heart not found; cannot rebuild as private.";
+                return false;
+            }
+            Entity donor = FindSiblingTeamDonor(oldC, heart);
+            if (donor == Entity.Null) donor = heart;
+            if (donor.TryGetComponent<Team>(out var donorTeam) && donor.TryGetComponent<TeamReference>(out var donorRef))
+            {
+                var refEntity = donorRef.Value._Value;
+                newC.With((ref Team t) => { t.Value = donorTeam.Value; t.FactionIndex = donorTeam.FactionIndex; });
+                newC.With((ref TeamReference tr) => tr.Value._Value = refEntity);
+            }
+            if (newC.Has<CastleHeartConnection>())
+                newC.With((ref CastleHeartConnection c) => c.CastleHeartEntity = heart);
+            if (heart.TryGetComponent<UserOwner>(out var hOwner) && newC.Has<UserOwner>())
+                newC.With((ref UserOwner uo) => uo = hOwner);
+        }
+
+        // inventory transfer + old destroy — the new container's own inventory
+        // entity may spawn a frame late, so try now and retry briefly if needed.
+        if (!FinishRebuild(oldC, newC))
+        {
+            Entity capturedOld = oldC, capturedNew = newC;
+            Tick.RunLater(3, () =>
+            {
+                if (!FinishRebuild(capturedOld, capturedNew))
+                {
+                    // Rollback: keep the old container, discard the new one. The
+                    // old container keeps its previous state — caller's command
+                    // already replied success, so log loudly.
+                    Core.Log.LogError("[Uriel SHARE] rebuild FAILED (inventory never resolved) — rolled back; container state unchanged.");
+                    if (capturedNew.Exists()) DestroyUtility.Destroy(Core.EntityManager, capturedNew);
+                }
+            });
+        }
+        return true;
+    }
+
+    /// <summary>Transfer the inventory old→new and destroy the old container. False if the new inventory isn't ready yet.</summary>
+    bool FinishRebuild(Entity oldC, Entity newC)
+    {
+        try
+        {
+            if (!oldC.Exists() || !newC.Exists()) return true; // already settled
+            Entity oldInv = ResolveInventoryEntity(oldC);
+            Entity newInv = ResolveInventoryEntity(newC);
+            if (newInv == Entity.Null) return false; // not spawned yet — retry
+            if (oldInv != Entity.Null
+                && Core.ServerGameManager.TryGetBuffer<InventoryBuffer>(oldInv, out var oldBuf)
+                && Core.ServerGameManager.TryGetBuffer<InventoryBuffer>(newInv, out var newBuf))
+            {
+                int n = Math.Min(oldBuf.Length, newBuf.Length);
+                int moved = 0;
+                for (int i = 0; i < n; i++)
+                {
+                    var slot = oldBuf[i];
+                    if (slot.ItemType._Value == 0 && slot.Amount <= 0) continue;
+                    newBuf[i] = slot;
+                    // Re-point the item entity at its new home, then clear the old
+                    // slot so destroying the old container can't cascade into it.
+                    Entity item = slot.ItemEntity.GetEntityOnServer();
+                    if (item.Exists() && item.Has<InventoryItem>())
+                        item.With((ref InventoryItem ii) => ii.ContainerEntity = newInv);
+                    var empty = slot;
+                    empty.ItemEntity = default;
+                    empty.ItemType = default;
+                    empty.Amount = 0;
+                    oldBuf[i] = empty;
+                    moved++;
+                }
+                if (Settings.VerboseLogging.Value)
+                    Core.Log.LogInfo($"[Uriel SHARE] rebuild: moved {moved} slot(s) to the new container.");
+            }
+            DestroyUtility.Destroy(Core.EntityManager, oldC);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Core.Log.LogError($"[Uriel SHARE] rebuild transfer failed: {ex}");
+            return true; // don't loop forever on an exception
+        }
     }
 
     // ================================================================ move-event enforcement (v0.3.0)
