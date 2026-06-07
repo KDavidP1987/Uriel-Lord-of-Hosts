@@ -29,20 +29,27 @@ internal static class ShareCommands
     //   .uriel share
     //   .uriel share limithours 6
     //   .uriel share LimitHours 6 Cost 123456789 100 Permission Take   (any order)
-    [Command("share", description: "Share the aimed container. Optional stackable modifiers (any order): permission take|give|givetake, limithours <h>, limitwithdrawal <stacks>, cost <itemId> <amount>.")]
+    [Command("share", description: "Share the aimed container. Optional stackable modifiers (any order): permission take|give|givetake, limithours <h>, limitwithdrawal <stacks>, cost <itemId> <amount>, nearest (target nearest container instead of aimed — for UI buttons).")]
     public static void Share(ChatCommandContext ctx,
         string m1 = null, string m2 = null, string m3 = null, string m4 = null, string m5 = null,
         string m6 = null, string m7 = null, string m8 = null, string m9 = null, string m10 = null)
     {
         if (!Ready(ctx)) return;
         var character = ctx.Event.SenderCharacterEntity;
-        var container = Core.PublicStorage.ResolveTargetContainer(character, out string err);
-        if (container == Unity.Entities.Entity.Null) { ctx.Reply(err); return; }
 
-        // Collect supplied tokens.
+        // Collect supplied tokens; "nearest" switches targeting (BCH UI buttons —
+        // clicking a panel leaves the aim ray pointing anywhere).
         var tokens = new System.Collections.Generic.List<string>();
+        bool nearest = false;
         foreach (var t in new[] { m1, m2, m3, m4, m5, m6, m7, m8, m9, m10 })
-            if (!string.IsNullOrWhiteSpace(t)) tokens.Add(t.Trim());
+        {
+            if (string.IsNullOrWhiteSpace(t)) continue;
+            if (t.Trim().Equals("nearest", System.StringComparison.OrdinalIgnoreCase)) { nearest = true; continue; }
+            tokens.Add(t.Trim());
+        }
+
+        var container = Core.PublicStorage.ResolveTargetContainer(character, out string err, nearest);
+        if (container == Unity.Entities.Entity.Null) { ctx.Reply(err); return; }
 
         // ---- Parse ALL modifiers first; nothing is applied if any token is invalid. ----
         var actions = new System.Collections.Generic.List<(string Kind, string S, double D, int A, int B)>();
@@ -110,12 +117,13 @@ internal static class ShareCommands
         static string Msg(bool _, string m) => m;
     }
 
-    [Command("unshare", description: "Make the public container you're aiming at private again.")]
-    public static void Unshare(ChatCommandContext ctx)
+    [Command("unshare", description: "Make the public container you're aiming at private again ((or '.uriel unshare nearest' for the closest one).")]
+    public static void Unshare(ChatCommandContext ctx, string mode = null)
     {
         if (!Ready(ctx)) return;
+        bool nearest = "nearest".Equals(mode?.Trim(), System.StringComparison.OrdinalIgnoreCase);
         var character = ctx.Event.SenderCharacterEntity;
-        var container = Core.PublicStorage.ResolveTargetContainer(character, out string err);
+        var container = Core.PublicStorage.ResolveTargetContainer(character, out string err, nearest);
         if (container == Unity.Entities.Entity.Null) { ctx.Reply(err); return; }
 
         Core.PublicStorage.Unshare(character, container, ctx.User.IsAdmin, out string message);
@@ -183,7 +191,7 @@ internal static class ShareCommands
     }
 
     [Command("takeprisoner", description: "Take the prisoner from the SHARED cell you're aiming at — they're subdued and released to you (have Dominating Presence ready).")]
-    public static void TakePrisoner(ChatCommandContext ctx)
+    public static void TakePrisoner(ChatCommandContext ctx, string mode = null)
     {
         if (!Core.IsReady) { ctx.Reply("Uriel is not yet initialized."); return; }
         if (!Settings.PublicStorage_Enabled.Value || !Settings.PublicPrison_Enabled.Value)
@@ -191,8 +199,9 @@ internal static class ShareCommands
             ctx.Reply("Prison-cell sharing is disabled by the server admin.");
             return;
         }
+        bool nearest = "nearest".Equals(mode?.Trim(), System.StringComparison.OrdinalIgnoreCase);
         var character = ctx.Event.SenderCharacterEntity;
-        var container = Core.PublicStorage.ResolveTargetContainer(character, out string err);
+        var container = Core.PublicStorage.ResolveTargetContainer(character, out string err, nearest);
         if (container == Unity.Entities.Entity.Null) { ctx.Reply(err); return; }
 
         // Authorization: the cell must be SHARED (then anyone may take), or the
@@ -230,21 +239,23 @@ internal static class ShareCommands
         ctx.Reply($"Reverted {restored} container(s) to private; purged {unresolved} stale entry(ies).");
     }
 
-    [Command("info", description: "Show the sharing rules of the container you're aiming at (anyone can use this).")]
-    public static void Info(ChatCommandContext ctx)
+    [Command("info", description: "Show the sharing rules of the aimed container (or '.uriel info nearest' for the closest one).")]
+    public static void Info(ChatCommandContext ctx, string mode = null)
     {
         if (!Core.IsReady) { ctx.Reply("Uriel is not yet initialized."); return; }
-        var container = Core.PublicStorage.ResolveTargetContainer(ctx.Event.SenderCharacterEntity, out string err);
+        bool nearest = "nearest".Equals(mode?.Trim(), System.StringComparison.OrdinalIgnoreCase);
+        var container = Core.PublicStorage.ResolveTargetContainer(ctx.Event.SenderCharacterEntity, out string err, nearest);
         if (container == Unity.Entities.Entity.Null) { ctx.Reply(err); return; }
         ctx.Reply(Core.PublicStorage.BuildInfoText(container));
     }
 
-    [Command("paychest", description: "Designate the PRIVATE chest you're aiming at to receive cost payments from your shared containers.")]
-    public static void PayChest(ChatCommandContext ctx)
+    [Command("paychest", description: "Designate the aimed PRIVATE chest to receive cost payments (or '.uriel paychest nearest').")]
+    public static void PayChest(ChatCommandContext ctx, string mode = null)
     {
         if (!Ready(ctx)) return;
+        bool nearest = "nearest".Equals(mode?.Trim(), System.StringComparison.OrdinalIgnoreCase);
         var character = ctx.Event.SenderCharacterEntity;
-        var container = Core.PublicStorage.ResolveTargetContainer(character, out string err);
+        var container = Core.PublicStorage.ResolveTargetContainer(character, out string err, nearest);
         if (container == Unity.Entities.Entity.Null) { ctx.Reply(err); return; }
         Core.PublicStorage.SetPayChest(character, container, out string message);
         ctx.Reply(message);

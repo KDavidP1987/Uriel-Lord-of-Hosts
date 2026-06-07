@@ -59,6 +59,10 @@ position/rotation/ownership.
 .uriel unshareall                 → (admin) revert everything to private
 ```
 
+Targeted commands also accept **`nearest`** to act on the container/stair
+closest to you instead of where you're aiming (e.g. `.uriel share nearest`,
+`.uriel stairswap stone2 nearest`) — useful while a menu or UI is open.
+
 Admins can also aim at **any** container and use `.uriel share [modifiers]` /
 `.uriel unshare` to override its sharing settings directly.
 

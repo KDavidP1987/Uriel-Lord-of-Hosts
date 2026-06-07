@@ -95,21 +95,40 @@ internal sealed class StairSwapService
     // ---------------------------------------------------------------- targeting
 
     /// <summary>
-    /// Aim → the stair BLUEPRINT ROOT: closest tile entity within range whose own
-    /// prefab (or fused root's prefab) is a BP_Castle_Stairs_*.
+    /// Resolve the stair BLUEPRINT ROOT: closest tile entity within range whose
+    /// own prefab (or fused root's prefab) is a BP_Castle_Stairs_*. Default mode
+    /// searches around the AIM position with an automatic nearest-to-player
+    /// fallback; nearestToPlayer mode (BCH UI buttons) searches around the
+    /// player only (v0.11.0).
     /// </summary>
-    public Entity ResolveTargetStair(Entity character, out string archetype, out string currentStyle, out string error)
+    public Entity ResolveTargetStair(Entity character, out string archetype, out string currentStyle, out string error, bool nearestToPlayer = false)
     {
         archetype = null;
         currentStyle = null;
         error = null;
-        if (!character.TryGetComponent<EntityAimData>(out var aimData))
+        float maxDist = Settings.StairSwap_MaxTargetDistance.Value;
+
+        if (!nearestToPlayer && character.TryGetComponent<EntityAimData>(out var aimData))
         {
-            error = "Could not read your aim position.";
+            Entity hit = ClosestStairTo(aimData.AimPosition, maxDist, out archetype, out currentStyle);
+            if (hit != Entity.Null) return hit;
+        }
+        if (!PublicStorageService.TryGetCharacterPosition(character, out var charPos))
+        {
+            error = "Could not read your position.";
             return Entity.Null;
         }
-        var aimPos = aimData.AimPosition;
-        float maxDist = Settings.StairSwap_MaxTargetDistance.Value;
+        Entity nearest = ClosestStairTo(charPos, maxDist, out archetype, out currentStyle);
+        if (nearest == Entity.Null)
+            error = $"No stair found within {maxDist:F0}m of you. Stand next to the staircase (or aim at it).";
+        return nearest;
+    }
+
+    static Entity ClosestStairTo(Unity.Mathematics.float3 refPos, float maxDist, out string archetype, out string currentStyle)
+    {
+        archetype = null;
+        currentStyle = null;
+        var aimPos = refPos;
         float maxDistSq = maxDist * maxDist;
 
         var builder = new EntityQueryBuilder(Allocator.Temp)
@@ -139,11 +158,6 @@ internal sealed class StairSwapService
                 bestRoot = root;
                 bestArch = arch;
                 bestStyle = style;
-            }
-            if (bestRoot == Entity.Null)
-            {
-                error = $"No stair found within {maxDist:F0}m of where you're aiming. Stand close and aim at the staircase.";
-                return Entity.Null;
             }
             archetype = bestArch;
             currentStyle = bestStyle;
@@ -196,9 +210,9 @@ internal sealed class StairSwapService
 
     // ---------------------------------------------------------------- swap
 
-    public bool Swap(Entity character, Entity userEntity, string styleKey, out string message)
+    public bool Swap(Entity character, Entity userEntity, string styleKey, out string message, bool nearestToPlayer = false)
     {
-        var root = ResolveTargetStair(character, out string archetype, out string currentStyle, out message);
+        var root = ResolveTargetStair(character, out string archetype, out string currentStyle, out message, nearestToPlayer);
         if (root == Entity.Null) return false;
 
         if (!PublicStorageService.CharacterControlsContainer(character, root))
@@ -346,9 +360,9 @@ internal sealed class StairSwapService
 
     // ---------------------------------------------------------------- info
 
-    public string DescribeStyles(Entity character, Entity userEntity)
+    public string DescribeStyles(Entity character, Entity userEntity, bool nearestToPlayer = false)
     {
-        var root = ResolveTargetStair(character, out string archetype, out string currentStyle, out string error);
+        var root = ResolveTargetStair(character, out string archetype, out string currentStyle, out string error, nearestToPlayer);
         if (root == Entity.Null) return error;
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"Stair: {archetype}, current style '{currentStyle}'. Available:");

@@ -87,10 +87,21 @@ Admin: `.uriel sharedall [name|steamId]` · `.uriel unshareplayer <name|steamId>
 · `.uriel unshareall` · `.uriel sharedebug` (state dump) · admins may aim+
 share/unshare/modify ANY container.
 
-**Targeting model:** every aimed command resolves the closest qualifying
-entity to `EntityAimData.AimPosition` within config range (storage 5m,
-stairs 6m). BCH buttons should ensure the player is looking at the target
-when relaying (same UX BCH uses for Beelzebub aim commands).
+**Targeting model (v0.11.0 — built FOR BCH buttons):** two modes:
+- **Default (aim):** closest qualifying entity to `EntityAimData.AimPosition`
+  within config range (storage 5m, stairs 6m); if nothing is at the aim
+  point, automatically falls back to nearest-to-player.
+- **`nearest` (deterministic — BCH buttons MUST use this):** closest entity to
+  the PLAYER, ignoring aim entirely. Clicking a UI panel leaves the aim ray
+  pointing anywhere (possibly at a DIFFERENT container behind the UI), so UI
+  relays should always append the nearest token:
+  `share` takes `nearest` as a stackable token anywhere in the modifier list
+  (`.uriel share nearest permission take`); `unshare` / `info` / `paychest` /
+  `takeprisoner` / `stairstyles` take it as a trailing arg
+  (`.uriel unshare nearest`); `stairswap` takes it after the style
+  (`.uriel stairswap stone2 nearest`).
+  BCH UX tip: after a `nearest` relay, the reply names the affected container/
+  stair — surface it so the player can confirm the right object was hit.
 
 **Reply shapes BCH may parse today (stable-ish, but human text — push Uriel
 for the `[URIEL:*]` API before building heavy parsers):**

@@ -3,6 +3,14 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.11.0 (2026-06-07)
+
+- All targeted commands accept a `nearest` option to act on the container or
+  stair closest to YOU instead of where you're aiming (e.g.
+  `.uriel share nearest`, `.uriel stairswap stone2 nearest`) — handy when a
+  UI or menu is open. Aim targeting also falls back to nearest automatically
+  when nothing is in front of you.
+
 ## 0.10.0 (2026-06-07)
 
 - NEW: `.uriel takeprisoner` — aim at a shared prison cell to take its

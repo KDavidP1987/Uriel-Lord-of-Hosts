@@ -163,22 +163,48 @@ internal sealed class PublicStorageService
     // ---------------------------------------------------------------- targeting
 
     /// <summary>
-    /// Resolve the placed castle container the player is aiming at: closest
-    /// entity with InventoryOwner + TilePosition + CastleHeartConnection within
-    /// MaxTargetDistance of the aim position (KindredCommands aim pattern).
+    /// Resolve the target container (v0.11.0 — two modes for BCH UI integration):
+    ///   - default: closest to the AIM position (hand-typed commands, cursor on
+    ///     the object); if nothing is in aim range, automatically falls back to
+    ///     nearest-to-player;
+    ///   - nearestToPlayer: closest to the PLAYER (deterministic — what UI
+    ///     buttons should request, since clicking a panel leaves the aim ray
+    ///     pointing anywhere, possibly at a DIFFERENT container behind the UI).
     /// </summary>
-    public Entity ResolveTargetContainer(Entity character, out string error)
+    public Entity ResolveTargetContainer(Entity character, out string error, bool nearestToPlayer = false)
     {
         error = null;
-        if (!character.TryGetComponent<EntityAimData>(out var aimData))
+        float maxDist = Settings.PublicStorage_MaxTargetDistance.Value;
+
+        if (!nearestToPlayer && character.TryGetComponent<EntityAimData>(out var aimData))
         {
-            error = "Could not read your aim position.";
+            Entity hit = ClosestContainerTo(aimData.AimPosition, maxDist);
+            if (hit != Entity.Null) return hit;
+            // fall through: nothing at the aim point — try around the player
+        }
+
+        if (!TryGetCharacterPosition(character, out var charPos))
+        {
+            error = "Could not read your position.";
             return Entity.Null;
         }
-        var aimPos = aimData.AimPosition;
-        float maxDist = Settings.PublicStorage_MaxTargetDistance.Value;
-        float maxDistSq = maxDist * maxDist;
+        Entity nearest = ClosestContainerTo(charPos, maxDist);
+        if (nearest == Entity.Null)
+            error = $"No castle container found within {maxDist:F0}m of you. Stand next to it (or aim at it).";
+        return nearest;
+    }
 
+    internal static bool TryGetCharacterPosition(Entity character, out Unity.Mathematics.float3 position)
+    {
+        if (character.TryGetComponent<Unity.Transforms.LocalToWorld>(out var ltw)) { position = ltw.Position; return true; }
+        if (character.TryGetComponent<Unity.Transforms.Translation>(out var tr)) { position = tr.Value; return true; }
+        position = default;
+        return false;
+    }
+
+    static Entity ClosestContainerTo(Unity.Mathematics.float3 refPos, float maxDist)
+    {
+        float maxDistSq = maxDist * maxDist;
         var query = Core.EntityManager.CreateEntityQuery(
             ComponentType.ReadOnly<InventoryOwner>(),
             ComponentType.ReadOnly<TilePosition>(),
@@ -194,7 +220,7 @@ internal sealed class PublicStorageService
                 if (!e.Has<CastleHeartConnection>()) continue; // placed castle objects only
                 if (!e.TryGetComponent<Unity.Transforms.Translation>(out var t)) continue;
                 var p = t.Value;
-                float dx = p.x - aimPos.x, dy = p.y - aimPos.y, dz = p.z - aimPos.z;
+                float dx = p.x - refPos.x, dy = p.y - refPos.y, dz = p.z - refPos.z;
                 float dsq = dx * dx + dy * dy + dz * dz;
                 if (dsq < closestSq && dsq <= maxDistSq)
                 {
@@ -202,8 +228,6 @@ internal sealed class PublicStorageService
                     closest = e;
                 }
             }
-            if (closest == Entity.Null)
-                error = $"No castle container found within {maxDist:F0}m of where you're aiming. Stand close and aim at it.";
             return closest;
         }
         finally

@@ -8,6 +8,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.11.0] - 2026-06-07
+
+### Added — `nearest` targeting mode (for BCH UI integration)
+- Every targeted command now supports targeting the container/stair **closest
+  to the player** instead of the aim point — built for BloodCraftHub UI
+  buttons, where clicking a panel leaves the aim ray pointing anywhere
+  (possibly at a different object behind the UI):
+  - `.uriel share nearest …` — stackable token, any position in the modifier list
+  - `.uriel unshare|info|paychest|takeprisoner|stairstyles nearest`
+  - `.uriel stairswap <style> nearest`
+- Aim mode (default, hand-typed commands) additionally gains an automatic
+  nearest-to-player fallback when nothing qualifies at the aim point.
+- BCH handoff §3 updated with the relay guidance (UI buttons always send
+  `nearest`; surface the reply's object name as confirmation).
+
 ## [0.10.0] - 2026-06-07
 
 ### Added — `.uriel takeprisoner` (experimental)
