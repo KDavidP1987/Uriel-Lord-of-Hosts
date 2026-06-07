@@ -8,6 +8,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.12.1] - 2026-06-07
+
+### Fixed — removal goes through the vanilla pipeline too
+- **v0.12.0 swaps left invisible "ghost" stairs** (walkable, unbuildable-over,
+  nothing visible) and the build event was refused (live test). Root cause:
+  `DestroyUtility` on a placed stair removes the entity but leaves the TILE
+  GRID CLAIMED and the fused segments' collision alive — so the cell never
+  read as free for the new placement. This also retroactively explains the
+  ghost residue under every earlier swap.
+- The swap now fires the game's own **`DismantleTileModelEvent`** (proper
+  grid release + fused-children teardown + vanilla material refund), polls
+  until the old root is really gone, THEN fires the build event
+  (`SharedInventory` consume — the refund covers it). Economics = exactly
+  manual demolish+rebuild. If dismantle is refused (broken stairs from old
+  builds), the swap aborts with nothing lost.
+- **New admin command `.uriel stairpurge`** — destroys all stair entities
+  (roots + segments) within 5m, for cleaning up the invisible ghosts already
+  created; restart the server afterwards to flush remaining grid claims,
+  then rebuild manually.
+
 ## [0.12.0] - 2026-06-07
 
 ### Fixed — stair swap now uses the game's own build pipeline

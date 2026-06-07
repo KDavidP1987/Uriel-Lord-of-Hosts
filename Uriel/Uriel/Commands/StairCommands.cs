@@ -32,6 +32,13 @@ internal static class StairCommands
         ctx.Reply(message);
     }
 
+    [Command("stairpurge", adminOnly: true, description: "(admin) Destroy ALL stair entities within 5m of you — cleanup for invisible 'ghost' stairs from older builds. Restart the server afterwards.")]
+    public static void StairPurge(ChatCommandContext ctx)
+    {
+        if (!Core.IsReady) { ctx.Reply("Uriel is not yet initialized."); return; }
+        ctx.Reply(Core.StairSwap.PurgeNear(ctx.Event.SenderCharacterEntity));
+    }
+
     [Command("stairstyles", description: "Show the aimed stair's shape, current style, and the styles available to you.")]
     public static void StairStyles(ChatCommandContext ctx, string mode = null)
     {

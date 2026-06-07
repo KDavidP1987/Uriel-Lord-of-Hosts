@@ -3,6 +3,14 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.12.1 (2026-06-07)
+
+- Fix: stair swaps no longer leave invisible "ghost" stairs — removal now
+  uses the game's own dismantle (with its normal material refund), and the
+  new style is built only once the spot is truly free.
+- New admin command `.uriel stairpurge` to clean up ghost stairs left by
+  earlier builds (stand near them, run it, restart the server, rebuild).
+
 ## 0.12.0 (2026-06-07)
 
 - Fix: swapped stairs are now REAL build objects — highlightable, movable,

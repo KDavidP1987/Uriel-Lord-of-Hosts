@@ -61,6 +61,7 @@ position/rotation/ownership.
 .uriel unshareplayer <player>     → (admin) revert ALL of one player's shares
 .uriel unshareall                 → (admin) revert everything to private
 .uriel sharedebug                 → (admin) dump a container's live sharing state
+.uriel stairpurge                 → (admin) destroy ghost stairs within 5m
 ```
 
 Targeted commands also accept **`nearest`** to act on the container/stair
