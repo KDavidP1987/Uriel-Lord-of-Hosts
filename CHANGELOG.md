@@ -8,6 +8,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.13.2] - 2026-06-07
+
+### Changed — honest visuals messaging; restart-refresh question answered
+- **Live validation: the identity swap WORKS** — a server restart renders the
+  swapped style (confirmed). Research settled the "can we refresh without a
+  restart" question: placed tiles are baked into per-chunk **MegaStatic
+  snapshots generated once at server load**; clients download the bake at
+  connect, and the only live replication channel is the destroyed-instance
+  list. There is **no modified-instance channel and no rebake API** — relog
+  cannot help (confirmed live). The swap reply now says plainly: *"the new
+  look appears for everyone at the NEXT SERVER RESTART (the change is
+  already saved)"* — no more misleading relog suggestion.
+- The realistic live-visuals path is client-side: documented in the BCH
+  handoff (§4.7) — BCH can detect the identity change and re-render the
+  stair locally. Deep server-side manager-buffer surgery is documented and
+  parked.
+
 ## [0.13.1] - 2026-06-07
 
 ### Fixed — the visual identity lives in the NETWORK id

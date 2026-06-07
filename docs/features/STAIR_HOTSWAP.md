@@ -1,6 +1,29 @@
 # Feature: Stair Hot-Swap
 
-**Status:** REIMPLEMENTED v0.12.0 (2026-06-07) — vanilla-pipeline route; pending live validation
+**Status:** WORKING v0.13.x (2026-06-07) — identity swap, validated live;
+visuals appear at the next server restart (engine bake limitation, see below)
+
+## Final mechanism (v0.13.x): IDENTITY SWAP — and the MegaStatic bake reality
+
+The owner's insight ended the destroy/rebuild saga: same-archetype cosmetics
+are component-identical and all TM_ segments are style-agnostic, so the swap
+**rewrites the placed root's identity in place** — `PrefabGUID`,
+`BlueprintData.Guid`, and `NetworkId.MegaStatic_PrefabGUID` (placed tiles are
+MegaStatic-networked; the visual id is embedded in the network identity).
+Nothing is destroyed or placed; the stair stays the original vanilla-built
+object. **Validated live: a server restart renders the swapped style.**
+
+**Why visuals wait for a restart (researched, definitive):** placed tiles are
+baked into per-chunk **MegaStatic snapshots** (`MegaStaticManager` with
+instance/prefab/destroyed buffers) generated ONCE at server load
+(`LoadPersistenceSystemV2.ReinstantiateMegaStatics`). Clients download the
+bake at connect; the only live replication is the destroyed-instance list
+(dismantles). There is no modified-instance channel and no rebake API —
+neither relog nor proximity refresh can show a changed visual mid-session.
+Possible future live paths (descending practicality): BCH client-side
+re-render (see the BCH handoff §4.7 — the realistic one); manager-buffer
+surgery (append old instance to `MegaStaticDestroyedBuffer` + convert the
+entity to Normal networking — deep, risky, parked).
 
 ## Mechanism revision (v0.12.0) — Route B failed live; Route A (vanilla events) is the answer
 

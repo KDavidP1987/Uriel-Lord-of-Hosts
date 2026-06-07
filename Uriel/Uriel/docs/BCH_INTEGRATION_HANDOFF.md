@@ -143,6 +143,20 @@ for the `[URIEL:*]` API before building heavy parsers):**
    `AB_Charm_Active_Human_Buff` (GUID 1303169868) owned by the taker — BCH
    could show the remaining charm duration so they get the prisoner home in
    time.
+7. **⛔→BCH: live stair-swap visuals.** Uriel's stair swap rewrites the placed
+   root's identity (`PrefabGUID` + `BlueprintData.Guid` +
+   `NetworkId.MegaStatic_PrefabGUID`) — durable and correct — but placed
+   tiles render from per-chunk **MegaStatic bakes generated once at server
+   load** (`MegaStaticManager` + instance/prefab buffers; only a
+   destroyed-list replicates live). So the new look appears at the next
+   server RESTART; no server-side refresh channel exists. **BCH, being
+   client-side, can close this gap**: detect a mismatch between a stair
+   entity's replicated `PrefabGUID` and the locally rendered baked model
+   (or watch for the swap's chat reply) and re-render/instantiate the
+   correct client-side visual immediately. Detection recipe: entity has
+   `CastleBuildingFusedRoot` + prefab name `BP_Castle_Stairs_*`; compare
+   against the client's `MegaStaticInstanceBuffer`/`MegaStaticPrefabBuffer`
+   entry for that `NetworkId.MegaStatic_StaticTransformIndex`.
 
 ## 5. Feature state & caveats BCH must respect
 

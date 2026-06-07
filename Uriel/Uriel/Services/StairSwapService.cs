@@ -319,7 +319,11 @@ internal sealed class StairSwapService
         PublicStorageService.ForceResync(oldRoot);
 
         Core.Log.LogInfo($"[Uriel STAIRS] identity swap: {archetype} {fromStyle} -> {toStyle} (entity preserved; megaStatic={wasMegaStatic}).");
-        message = $"Stair swapped: {fromStyle} -> {toStyle} ({archetype}). If it still LOOKS like the old style, relog — and everything fully settles at the next server restart.";
+        // Honest UX (live finding): placed tiles are baked into per-chunk
+        // MegaStatic snapshots generated ONCE at server load — there is no
+        // modified-instance channel, so the new look appears at the next
+        // server restart (not on relog). The swap itself is already durable.
+        message = $"Stair swapped: {fromStyle} -> {toStyle} ({archetype}). The new look appears for everyone at the NEXT SERVER RESTART (the change is already saved).";
         return true;
     }
     /// <summary>
