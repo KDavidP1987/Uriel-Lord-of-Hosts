@@ -54,4 +54,12 @@ belongs here: things that bit once and must not bite twice.
 
 ## Lessons learned (append below as they happen)
 
-_(empty — first entry comes from the first real gotcha)_
+- **2026-06-06 (v0.2.1) — default EntityQueries skip Disabled entities.**
+  World chests AND placed castle objects carry `DisableWhenNoPlayersInRange`,
+  so they are `Disabled` whenever no player is nearby — which is *always* the
+  case during boot-time work and *usually* the case for distant world objects.
+  The donor-team lookup returned nothing on a live server because of this.
+  Any query that must see placed/world objects needs
+  `EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag`
+  via `EntityQueryBuilder` (KindredCommands does this everywhere — now we
+  know why). Queries for *players interacting right now* can stay default.

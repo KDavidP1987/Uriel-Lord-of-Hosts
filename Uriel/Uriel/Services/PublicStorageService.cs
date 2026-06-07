@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using Il2CppInterop.Runtime;
 using ProjectM;
 using ProjectM.CastleBuilding;
 using Stunlock.Core;
@@ -172,19 +173,30 @@ internal sealed class PublicStorageService
     // ---------------------------------------------------------------- team plumbing
 
     /// <summary>
-    /// Find a live world chest and cache its Team/TeamReference as the neutral
+    /// Find a world chest and cache its Team/TeamReference as the neutral
     /// "public" team. Resolved lazily (entities must exist; init order safe).
+    ///
+    /// v0.2.1: world chests carry DisableWhenNoPlayersInRange, so they sit
+    /// Disabled whenever no player is nearby — and DEFAULT EntityQueries skip
+    /// disabled entities, which made this lookup fail on a live server. The
+    /// query now includes Disabled/SpawnTag entities (KindredCommands pattern),
+    /// and if no placed world chest is found at all, we fall back to the
+    /// world chest PREFAB entity from the prefab lookup map, which always
+    /// exists and carries the same neutral Team/TeamReference defaults.
     /// </summary>
     bool TryResolveDonorTeam()
     {
-        if (_donorResolved && _donorTeamRefEntity.Exists()) return true;
+        if (_donorResolved && (_donorTeamRefEntity == Entity.Null || _donorTeamRefEntity.Exists()))
+            return true;
         _donorResolved = false;
 
-        var query = Core.EntityManager.CreateEntityQuery(
-            ComponentType.ReadOnly<PrefabGUID>(),
-            ComponentType.ReadOnly<Team>(),
-            ComponentType.ReadOnly<TeamReference>(),
-            ComponentType.ReadOnly<InventoryOwner>());
+        // Pass 1: a placed world chest in the live world (include disabled).
+        var builder = new EntityQueryBuilder(Allocator.Temp)
+            .AddAll(new(Il2CppType.Of<PrefabGUID>(), ComponentType.AccessMode.ReadOnly))
+            .AddAll(new(Il2CppType.Of<Team>(), ComponentType.AccessMode.ReadOnly))
+            .AddAll(new(Il2CppType.Of<TeamReference>(), ComponentType.AccessMode.ReadOnly))
+            .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
+        var query = Core.EntityManager.CreateEntityQuery(ref builder);
         var entities = query.ToEntityArray(Allocator.Temp);
         try
         {
@@ -199,8 +211,7 @@ internal sealed class PublicStorageService
                 _donorTeam = team;
                 _donorTeamRefEntity = teamRef.Value._Value;
                 _donorResolved = true;
-                if (Settings.VerboseLogging.Value)
-                    Core.Log.LogInfo($"[Uriel SHARE] neutral-team donor: {guid.GetPrefabName()} (Team.Value={team.Value}).");
+                Core.Log.LogInfo($"[Uriel SHARE] neutral-team donor: live {guid.GetPrefabName()} (Team.Value={team.Value}, ref={_donorTeamRefEntity}).");
                 return true;
             }
         }
@@ -208,7 +219,24 @@ internal sealed class PublicStorageService
         {
             entities.Dispose();
         }
-        Core.Log.LogWarning("[Uriel SHARE] no world chest found to donate a neutral team — sharing unavailable this session.");
+
+        // Pass 2: the prefab entity itself (always present in the lookup map).
+        foreach (int guidValue in WorldChestGuids)
+        {
+            var guid = new PrefabGUID(guidValue);
+            if (Core.PrefabCollectionSystem._PrefabLookupMap.TryGetValue(guid, out Entity prefabEntity)
+                && prefabEntity.TryGetComponent<Team>(out var team)
+                && prefabEntity.TryGetComponent<TeamReference>(out var teamRef))
+            {
+                _donorTeam = team;
+                _donorTeamRefEntity = teamRef.Value._Value;
+                _donorResolved = true;
+                Core.Log.LogInfo($"[Uriel SHARE] neutral-team donor: PREFAB {guid.GetPrefabName()} (Team.Value={team.Value}, ref={_donorTeamRefEntity}).");
+                return true;
+            }
+        }
+
+        Core.Log.LogWarning("[Uriel SHARE] no world chest found (live or prefab) to donate a neutral team — sharing unavailable this session.");
         return false;
     }
 
@@ -364,13 +392,18 @@ internal sealed class PublicStorageService
 
     /// <summary>
     /// Find the live entity for a registry entry (prefab GUID + tile coords).
+    /// v0.2.1: must include Disabled entities — castle containers carry
+    /// DisableWhenNoPlayersInRange and are disabled whenever nobody is near
+    /// (which is ALWAYS true during the boot-time re-apply).
     /// </summary>
     Entity ResolveEntry(PublicContainerEntry entry)
     {
-        var query = Core.EntityManager.CreateEntityQuery(
-            ComponentType.ReadOnly<InventoryOwner>(),
-            ComponentType.ReadOnly<TilePosition>(),
-            ComponentType.ReadOnly<PrefabGUID>());
+        var builder = new EntityQueryBuilder(Allocator.Temp)
+            .AddAll(new(Il2CppType.Of<InventoryOwner>(), ComponentType.AccessMode.ReadOnly))
+            .AddAll(new(Il2CppType.Of<TilePosition>(), ComponentType.AccessMode.ReadOnly))
+            .AddAll(new(Il2CppType.Of<PrefabGUID>(), ComponentType.AccessMode.ReadOnly))
+            .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
+        var query = Core.EntityManager.CreateEntityQuery(ref builder);
         var entities = query.ToEntityArray(Allocator.Temp);
         try
         {

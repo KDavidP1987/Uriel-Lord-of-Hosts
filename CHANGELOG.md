@@ -8,6 +8,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.2.1] - 2026-06-06
+
+### Fixed
+- **"Sharing unavailable: no neutral team source found"** on live servers.
+  World chests (and placed castle objects) carry `DisableWhenNoPlayersInRange`
+  and sit `Disabled` whenever nobody is nearby — and default ECS queries skip
+  disabled entities. Both the neutral-team donor lookup and the boot-time
+  registry re-apply now query with `IncludeDisabled | IncludeSpawnTag`
+  (the latter would have silently failed on every restart otherwise).
+- Added a second donor fallback: if no placed world chest resolves at all,
+  the neutral team is copied from the world chest *prefab* entity in the
+  prefab lookup map, which always exists.
+- Donor resolution now always logs which source it used (live vs. prefab,
+  team value, team-ref entity) to ease diagnosing the in-game validation.
+
 ## [0.2.0] - 2026-06-06
 
 ### Added

@@ -3,6 +3,12 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.2.1 (2026-06-06)
+
+- Fix: `.uriel share` reported "no neutral team source found" on live servers
+  (distant world objects are disabled and were invisible to the lookup; also
+  fixed the same issue in share re-application at server restart).
+
 ## 0.2.0 (2026-06-06)
 
 - **Public storage (experimental):** aim at one of your castle chests and use
