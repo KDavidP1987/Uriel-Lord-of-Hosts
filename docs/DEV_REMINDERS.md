@@ -1,0 +1,57 @@
+# DEV REMINDERS — standing rules for working on Uriel
+
+Hard-won rules (most inherited from Beelzebub development). Add to this file
+whenever a new gotcha costs real debugging time — that's the rule for what
+belongs here: things that bit once and must not bite twice.
+
+## IL2CPP / ECS
+
+- **No game-type statics at Load.** `Il2CppType.Of<T>()`,
+  `ComponentType.ReadOnly<T>()`, prefab lookups — all NRE before `TypeManager`
+  is built. Initialize in `Core.TryInitialize`, which only runs once the
+  Server world + `PrefabCollectionSystem` are populated.
+- **Gate every patch on `Core.IsReady`.** Harmony patches fire during boot.
+- **Never throw across a Harmony boundary.** try/catch + `Core.Log` inside
+  every patch body. A leaked exception inside a server system update can
+  corrupt the tick or crash Burst jobs.
+- **Two writers, one component = crash.** If two systems (or the mod + the
+  game) write the same buffer/slot, expect
+  `AppendRemovedComponentRecordError`-style Burst crashes. Before writing a
+  shared component, find out who else writes it (Beelzebub's Mountup bug).
+- **Entity lifetime is not your call.** Cache `Entity` handles only with an
+  `Exists()` check on every later use; entities despawn between frames.
+
+## V Rising specifics
+
+- **Server-only.** `Application.productName == "VRisingServer"` guard stays.
+  Nothing in this mod may require a client-side counterpart to function.
+- **Prefab research before code.** Before referencing any prefab/component,
+  confirm its layout in the prefab dump
+  (`..\Beelzebub Lord of Gluttony\Reference Data\Prefabs\`). Castle tiles are
+  `TM_*`, abilities `AB_*`, buffs `Buff_*`, characters `CHAR_*`.
+- **Pick patch targets by reading prior art.** Bloodcraft and KindredCommands
+  have probably already hooked the system you need; copy their target choice,
+  not just their idea.
+- **Mod state persists itself.** The game save won't store mod data. JSON
+  under `BepInEx/config/Uriel/`, debounced save-on-change + save-on-unload,
+  and a migration path whenever the schema changes.
+
+## Process
+
+- **Feature flag everything.** Every feature ships with a `Settings` master
+  switch, default chosen for least surprise. Admins opt in/out per feature.
+- **One feature, one design doc.** `docs/features/<FEATURE>.md` is the living
+  spec; code changes that alter behavior update the doc in the same commit.
+- **Conventional Commits**, release commits `chore(release): vX.Y.Z`.
+- **Six release surfaces move together** (see CLAUDE.md): csproj version,
+  toml version, root CHANGELOG (full/GitHub), package CHANGELOG
+  (concise/Thunderstore), root README (GitHub), package README (Thunderstore).
+  `tools/preflight.ps1` verifies before the release commit.
+- **Stop the server before deploying.** The running server file-locks the DLL.
+- **Test on the live local server, then record results** in the feature doc
+  (what was tested, what passed, what's still unverified). Untested code is
+  marked as such in the changelog ("experimental").
+
+## Lessons learned (append below as they happen)
+
+_(empty — first entry comes from the first real gotcha)_
