@@ -13,9 +13,10 @@ fixes, each individually toggleable by server admins.
 
 | Feature | Status | Design doc |
 |---|---|---|
-| **Public storage** — per-container opt-in: mark a specific chest publicly accessible, with optional permissions (take/give), per-player withdrawal limits, and per-stack access costs paid to the owner | Implemented (experimental; open+take validated live, policies pending validation) | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
-| **Public prison cells** — separately mark a prison cell publicly accessible (feed/extract/charm-out) | Implemented (experimental, pending live validation) | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
-| **Stair hot-swap** — restyle placed stairs in place (same-shape cosmetics only, DLC styles gated by ownership) | Implemented (experimental, pending live validation) | [docs/features/STAIR_HOTSWAP.md](docs/features/STAIR_HOTSWAP.md) |
+| **Public storage** — per-container opt-in: mark a specific chest publicly accessible, with optional permissions (take/give), per-player withdrawal limits, per-stack access costs paid to the owner, and `nearest` targeting for UI relays | Implemented; open+take validated live; v0.9.0 rebuild-on-share mechanism + policies pending validation | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
+| **Public prison cells** — separately mark a prison cell publicly accessible: feed/extract via the native UI, prisoner takeover via `.uriel takeprisoner` (the native subdue button is client-gated to the cell's clan — confirmed unreachable server-side) | Implemented; feed/extract validated live; takeprisoner pending validation | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
+| **Stair hot-swap** — restyle placed stairs in place (same-shape cosmetics only, per-user DLC ownership gating) | Implemented; swap validated live; v0.9.0 editability fix pending validation | [docs/features/STAIR_HOTSWAP.md](docs/features/STAIR_HOTSWAP.md) |
+| **BloodCraftHub integration** — client-side companion UI (share panels, prisoner-take button, stair picker) | Contract authored; BCH-side work pending | [Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md](Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md) |
 
 Every feature ships behind its own config switch — Uriel is never
 all-or-nothing.
@@ -48,6 +49,7 @@ redeploying — it file-locks the DLL.
 - [`CLAUDE.md`](CLAUDE.md) — working agreements & architecture guide
 - [`docs/PREFLIGHT.md`](docs/PREFLIGHT.md) — session-start checklist
 - [`docs/DEV_REMINDERS.md`](docs/DEV_REMINDERS.md) — IL2CPP/ECS gotchas & process rules
+- [`Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md`](Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md) — the BloodCraftHub living contract
 - [`CHANGELOG.md`](CHANGELOG.md) — full changelog (the Thunderstore package
   carries a condensed player-facing changelog)
 

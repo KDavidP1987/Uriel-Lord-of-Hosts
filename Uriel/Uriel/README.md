@@ -15,9 +15,12 @@ boxes. Always per-container and owner-controlled: nothing is shared unless its
 owner shares it. Shares survive server restarts.
 
 **Public prison cells** *(experimental)*: share a prison cell to let anyone
-tend your prisoner — feed, extract blood, or charm the prisoner out as their
-own subdued follower. Governed by its own admin switch, independent of chest
-sharing.
+tend your prisoner — feed and extract blood through the normal cell UI, and
+take the prisoner home with `.uriel takeprisoner` (they're subdued and
+released to the taker; bring Dominating Presence to escort them). The game's
+own subdue button only ever appears for the cell's clan — an engine
+limitation — so the command covers everyone else. Governed by its own admin
+switch, independent of chest sharing.
 
 **Sharing rules** (set by aiming at your shared container):
 - *Permission*: take-only, give-only (donation box), or both.
@@ -57,6 +60,7 @@ position/rotation/ownership.
 .uriel sharedall [player]         → (admin) list all/one player's public containers
 .uriel unshareplayer <player>     → (admin) revert ALL of one player's shares
 .uriel unshareall                 → (admin) revert everything to private
+.uriel sharedebug                 → (admin) dump a container's live sharing state
 ```
 
 Targeted commands also accept **`nearest`** to act on the container/stair
