@@ -1,7 +1,31 @@
 # Feature: Public Storage (per-container opt-in)
 
-**Status:** IMPLEMENTED v0.3.0 (storage class + policy modifiers) — open/take
-VALIDATED live (v0.2.1, 2026-06-06); deposits + policies pending validation
+**Status:** IMPLEMENTED v0.5.0 (storage + policy modifiers + prison cells) —
+open/take VALIDATED live (v0.2.1); deposits fixed v0.4.1; policies + prison
+pending validation
+
+## Prison cells (v0.5.0)
+
+`.uriel share` aimed at a cell (`Prisonstation` component) shares it as class
+`prison`, gated by `PublicStorage.PrisonEnabled` (independent of chest
+sharing, per the owner's requirement). Mechanism: the same team-swap — a
+neutral-team cell should let strangers use the full vanilla prison surface:
+
+- **Feed / extract blood** — workstation recipes on the cell
+  (`WorkstationRecipesBuffer`: `Recipe_Misc_FeedPrisoner_*`,
+  `Recipe_Misc_ExtractEssencePrisoner`).
+- **Charm out the prisoner** — `InteractWithPrisonerSystem` processes
+  `InteractWithPrisonerEvent` (`PrisonInteraction`: Imprison/**Charm**/Kill).
+  Charm is the built-in "withdraw prisoner as subdued follower" flow; the
+  expectation is vanilla assigns the subdued unit to the interactor
+  (`FromCharacter`). **Headline validation question:** does charm-out work
+  for a stranger on a neutral cell, and does the subdued prisoner follow the
+  STRANGER (not the owner)? If the system validates against the PRISONER's
+  own team rather than the cell's, the next iteration patches
+  `InteractWithPrisonerSystem` (PalacePrivileges has the patch shape).
+- The cell's 8 feeding slots behave like a (restricted) shared inventory —
+  the move-event policy applies, and deposits respect the slot restriction
+  (only feeding consumables; see ItemFitsRestriction).
 
 ## Live validation results (v0.2.1, 2026-06-06)
 
@@ -237,6 +261,20 @@ load. Schema version field from day one.
 - [ ] `.uriel unshare` → stranger denied again (prompt gone/locked).
 - [ ] Restart server → share + policies + usage windows persist.
 - [ ] `PublicStorage.Enabled = false` → commands refuse; patches inert.
+
+**Prison-cell validation (v0.5.0):**
+- [ ] Owner shares a cell WITH a prisoner → stranger can open the cell UI.
+- [ ] Stranger can feed the prisoner (place feeding item, run feed recipe).
+- [ ] Stranger can extract blood essence.
+- [ ] **Stranger can CHARM the prisoner out — and the subdued prisoner
+      follows the STRANGER, not the owner.** (Headline question.)
+- [ ] Stranger can then imprison that unit in their OWN castle's cell.
+- [ ] Wrong-type item deposit into the cell's feeding slots → denied with
+      "doesn't accept this type of item".
+- [ ] `.uriel unshare` the cell → stranger locked out again.
+- [ ] `PublicStorage.PrisonEnabled = false` → sharing a cell refused;
+      chest sharing unaffected (independence check).
+- [ ] Restart with a shared cell → share persists, prisoner unharmed.
 
 **Still to verify sometime:** sort/split paths from stranger account, castle
 decay behavior, raid-breach interaction.

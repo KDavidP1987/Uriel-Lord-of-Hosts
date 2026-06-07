@@ -3,6 +3,15 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.5.0 (2026-06-07)
+
+- Public PRISON CELLS (experimental): `.uriel share` a cell to let anyone
+  feed/extract from your prisoner — or charm the prisoner out as their own
+  subdued follower. Separate admin switch (`PublicStorage.PrisonEnabled`);
+  chest and cell sharing stay independent.
+- Fix: deposits can no longer push wrong-type items into restricted slots
+  (prison feeding slots, lumber/seed stashes).
+
 ## 0.4.1 (2026-06-06)
 
 - Fix: depositing into a shared container no longer fails with "container is

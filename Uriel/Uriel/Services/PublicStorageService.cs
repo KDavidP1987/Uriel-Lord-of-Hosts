@@ -384,9 +384,9 @@ internal sealed class PublicStorageService
     public bool Share(Entity character, Entity container, out string message)
     {
         string cls = ClassifyContainer(container);
-        if (cls == "prison")
+        if (cls == "prison" && !Settings.PublicPrison_Enabled.Value)
         {
-            message = "Prison cells are a separate feature (coming soon) — this command shares storage only.";
+            message = "Prison-cell sharing is disabled by the server admin (PublicStorage.PrisonEnabled).";
             return false;
         }
         if (cls == "coffin")
@@ -426,7 +426,9 @@ internal sealed class PublicStorageService
             SharedAtUtc = DateTime.UtcNow.ToString("u"),
         });
         SaveSync();
-        message = $"{container.GetPrefabGuid().GetPrefabName()} is now PUBLIC — anyone on the server can use it. Aim at it and use '.uriel unshare' to revert.";
+        message = cls == "prison"
+            ? $"{container.GetPrefabGuid().GetPrefabName()} is now PUBLIC — anyone can tend the prisoner (feed, extract blood) or charm them out as their own subdued follower. '.uriel unshare' to revert."
+            : $"{container.GetPrefabGuid().GetPrefabName()} is now PUBLIC — anyone on the server can use it. Aim at it and use '.uriel unshare' to revert.";
         return true;
     }
 
@@ -880,6 +882,31 @@ internal sealed class PublicStorageService
     }
 
     /// <summary>
+    /// Does this item respect the container's inventory restriction (prison cells
+    /// accept only feeding consumables; lumber stashes only wood; …)? Checked
+    /// before manual deposits so the mod never forces a wrong-type item in.
+    /// </summary>
+    public static bool ItemFitsRestriction(Entity container, PrefabGUID itemGuid)
+    {
+        if (!Core.ServerGameManager.TryGetBuffer<InventoryInstanceElement>(container, out var elements))
+            return true; // no restriction data — let the capacity/add path decide
+        long itemCategory = 0;
+        try
+        {
+            if (Core.ServerGameManager.ItemLookupMap.TryGetValue(itemGuid, out ItemData data))
+                itemCategory = (long)data.ItemCategory;
+        }
+        catch { /* unknown item — fall through to the flag checks below */ }
+        for (int i = 0; i < elements.Length; i++)
+        {
+            var e = elements[i];
+            if (e.RestrictedType._Value != 0 && e.RestrictedType._Value != itemGuid._Value) return false;
+            if ((long)e.RestrictedCategory != 0 && (itemCategory & (long)e.RestrictedCategory) == 0) return false;
+        }
+        return true;
+    }
+
+    /// <summary>
     /// How many of <paramref name="itemGuid"/> still FIT in this container
     /// (empty slots × max stack + headroom on same-item stacks)? Capacity is
     /// pre-checked BEFORE any payment is collected so a full destination can
@@ -1040,6 +1067,11 @@ internal sealed class PublicStorageService
             if (targetInv == Entity.Null)
             {
                 Core.Log.LogWarning($"[Uriel SHARE] deposit: container {toContainer.GetPrefabGuid().GetPrefabName()} has no resolvable inventory entity; leaving event to vanilla.");
+                return;
+            }
+            if (!ItemFitsRestriction(toContainer, itemGuid))
+            {
+                Deny(eventEntity, userEntity, "That container doesn't accept this type of item.");
                 return;
             }
             if (CountFit(toContainer, itemGuid) < amount)

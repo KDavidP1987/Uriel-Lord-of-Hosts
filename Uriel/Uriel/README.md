@@ -12,8 +12,12 @@ players need nothing.
 Mark a *specific* chest as publicly accessible so anyone on the server can use
 it — community chests, donation boxes, free-stuff stashes, even paid vending
 boxes. Always per-container and owner-controlled: nothing is shared unless its
-owner shares it. Shares survive server restarts. Marking a prison cell public
-(so others may draw from your prisoners) is a separate upcoming feature.
+owner shares it. Shares survive server restarts.
+
+**Public prison cells** *(experimental)*: share a prison cell to let anyone
+tend your prisoner — feed, extract blood, or charm the prisoner out as their
+own subdued follower. Governed by its own admin switch, independent of chest
+sharing.
 
 **Sharing rules** (set by aiming at your shared container):
 - *Permission*: take-only, give-only (donation box), or both.
@@ -53,7 +57,7 @@ already swap.
 | Section | Key | Default | Effect |
 |---|---|---|---|
 | PublicStorage | Enabled | true | Allow per-chest public sharing |
-| PublicStorage | PrisonEnabled | true | Allow per-cell public prison sharing *(not yet implemented)* |
+| PublicStorage | PrisonEnabled | true | Allow per-cell public prison sharing *(experimental)* |
 | PublicStorage | MaxTargetDistance | 5 | Aim distance for `.uriel share`/`unshare` targeting |
 | StairSwap | Enabled | true | Allow in-place stair swapping *(not yet implemented)* |
 

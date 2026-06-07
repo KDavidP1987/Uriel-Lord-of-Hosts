@@ -8,6 +8,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.5.0] - 2026-06-07
+
+### Added — public prison cells (experimental)
+- `.uriel share` aimed at a prison cell now shares it (was "coming soon"),
+  gated by the separate `PublicStorage.PrisonEnabled` config switch. A public
+  cell lets anyone tend the prisoner — feed, extract blood — or **charm the
+  prisoner out as their own subdued follower** (the vanilla
+  `InteractWithPrisonerSystem` Imprison/Charm/Kill flow; the cell's neutral
+  team should let the built-in charm/subdue mechanics run for strangers with
+  the interactor as the new escort — the headline thing to validate live).
+- Prison entries are a distinct container class in the registry (`prison`),
+  listed as such in `.uriel sharedall`; chest sharing and cell sharing remain
+  independently governed, per design.
+- Pay chests already refuse prison cells; unchanged.
+
+### Fixed
+- Manual deposits now respect inventory RESTRICTIONS
+  (`InventoryInstanceElement.RestrictedType/RestrictedCategory` vs.
+  `ItemData.ItemCategory`): the mod can no longer force a wrong-type item
+  into a prison cell's feeding slots or a specialized stash via the
+  deposit-execution path. Denied with "doesn't accept this type of item."
+
 ## [0.4.1] - 2026-06-06
 
 ### Fixed

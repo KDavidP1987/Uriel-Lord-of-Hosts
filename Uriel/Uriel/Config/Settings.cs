@@ -34,9 +34,10 @@ internal static class Settings
 
         PublicPrison_Enabled = config.Bind(
             "PublicStorage", "PrisonEnabled", true,
-            "Allow a prison cell's owner to mark a SPECIFIC cell as publicly accessible (others may " +
-            "draw blood from / take the prisoner). Separate switch from chest sharing — prison cells " +
-            "are a different container type and are governed independently. (Not yet implemented.)");
+            "Allow a prison cell's owner to mark a SPECIFIC cell as publicly accessible: others may " +
+            "feed the prisoner, extract blood, or charm the prisoner out as their own subdued follower. " +
+            "Separate switch from chest sharing — prison cells are a different container type and are " +
+            "governed independently. (Requires PublicStorage.Enabled as the master switch.)");
 
         PublicStorage_MaxTargetDistance = config.Bind(
             "PublicStorage", "MaxTargetDistance", 5f,
