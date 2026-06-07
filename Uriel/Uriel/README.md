@@ -46,9 +46,19 @@ already swap.
     .uriel share LimitHours 6 Cost 123456789 100 Permission Take
 .uriel paychest                   → aim at a PRIVATE chest: receives payments
 .uriel finditem <name>            → search item ids for the cost command
-.uriel sharedall                  → (admin) list all public containers
+.uriel unsharemine                → revert ALL of your shares in one command
+.uriel sharedall [player]         → (admin) list all/one player's public containers
+.uriel unshareplayer <player>     → (admin) revert ALL of one player's shares
 .uriel unshareall                 → (admin) revert everything to private
 ```
+
+Admins can also aim at **any** container and use `.uriel share [modifiers]` /
+`.uriel unshare` to override its sharing settings directly.
+
+**Admin kill switches:** `PublicStorage.Enabled` disables the whole feature
+(commands refuse, enforcement stops, shares boot as private chests after
+restart); `PublicStorage.PrisonEnabled` independently governs prison cells.
+Config changes take effect on server restart.
 
 ## Configuration
 

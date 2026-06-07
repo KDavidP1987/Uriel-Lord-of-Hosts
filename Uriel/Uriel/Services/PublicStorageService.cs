@@ -381,7 +381,7 @@ internal sealed class PublicStorageService
 
     public bool IsShared(Entity container) => FindEntry(container) is not null;
 
-    public bool Share(Entity character, Entity container, out string message)
+    public bool Share(Entity character, Entity container, out string message, bool isAdmin = false)
     {
         string cls = ClassifyContainer(container);
         if (cls == "prison" && !Settings.PublicPrison_Enabled.Value)
@@ -394,7 +394,7 @@ internal sealed class PublicStorageService
             message = "Servant coffins can't be shared.";
             return false;
         }
-        if (!CharacterControlsContainer(character, container))
+        if (!isAdmin && !CharacterControlsContainer(character, container))
         {
             message = "You don't control this container (its castle isn't yours/your clan's).";
             return false;
@@ -455,6 +455,57 @@ internal sealed class PublicStorageService
         SaveSync();
         message = $"{container.GetPrefabGuid().GetPrefabName()} is private again.";
         return true;
+    }
+
+    /// <summary>
+    /// Player bulk shutdown: unshare every container the caller shared OR currently
+    /// controls (their castle-heart team). Stale entries that no longer resolve are
+    /// purged when they belong to the caller.
+    /// </summary>
+    public (int Restored, int Purged) UnshareMine(Entity character)
+    {
+        ulong steamId = character.GetSteamId();
+        int restored = 0, purged = 0;
+        foreach (var entry in new List<PublicContainerEntry>(_entries))
+        {
+            var container = ResolveEntry(entry);
+            bool mine = entry.SharedBySteamId == steamId
+                || (container != Entity.Null && CharacterControlsContainer(character, container));
+            if (!mine) continue;
+            if (container == Entity.Null) { _entries.Remove(entry); purged++; continue; }
+            if (RestoreCastleTeam(container, out _)) restored++;
+            _entries.Remove(entry);
+        }
+        SaveSync();
+        return (restored, purged);
+    }
+
+    /// <summary>Admin bulk shutdown: unshare every container shared by the given steamId.</summary>
+    public (int Restored, int Purged) UnshareBySteamId(ulong steamId)
+    {
+        int restored = 0, purged = 0;
+        foreach (var entry in new List<PublicContainerEntry>(_entries))
+        {
+            if (entry.SharedBySteamId != steamId) continue;
+            var container = ResolveEntry(entry);
+            if (container == Entity.Null) { _entries.Remove(entry); purged++; continue; }
+            if (RestoreCastleTeam(container, out _)) restored++;
+            _entries.Remove(entry);
+        }
+        SaveSync();
+        return (restored, purged);
+    }
+
+    /// <summary>Compact one-line summary of an entry (for list commands).</summary>
+    public string DescribeEntry(PublicContainerEntry e)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"{new PrefabGUID(e.PrefabGuid).GetPrefabName()} @({e.TileX},{e.TileY}) [{e.ContainerClass}] {e.Permission}");
+        if (e.LimitWithdrawStacks > 0)
+            sb.Append($", limit {e.LimitWithdrawStacks}/{(e.LimitHours > 0 ? e.LimitHours : 24):0.#}h");
+        if (e.CostItemGuid != 0)
+            sb.Append($", cost {e.CostAmount}× {new PrefabGUID(e.CostItemGuid).GetPrefabName()}");
+        return sb.ToString();
     }
 
     /// <summary>Admin: unshare everything, restoring each resolvable container.</summary>
@@ -541,15 +592,15 @@ internal sealed class PublicStorageService
 
     // ================================================================ policy modifiers (v0.3.0)
 
-    /// <summary>Find (or create by sharing) the entry for a container the caller controls.</summary>
-    bool TryGetOrShare(Entity character, Entity container, out PublicContainerEntry entry, out string error)
+    /// <summary>Find (or create by sharing) the entry for a container the caller controls (admins override).</summary>
+    bool TryGetOrShare(Entity character, Entity container, bool isAdmin, out PublicContainerEntry entry, out string error)
     {
         entry = FindEntry(container);
         error = null;
         if (entry is not null)
         {
-            // Policy edits require control (or being the original sharer).
-            if (!CharacterControlsContainer(character, container) && character.GetSteamId() != entry.SharedBySteamId)
+            // Policy edits require control (or being the original sharer); admins override.
+            if (!isAdmin && !CharacterControlsContainer(character, container) && character.GetSteamId() != entry.SharedBySteamId)
             {
                 entry = null;
                 error = "You don't control this container, so you can't change its sharing policy.";
@@ -557,13 +608,13 @@ internal sealed class PublicStorageService
             }
             return true;
         }
-        if (!Share(character, container, out string shareMsg)) { error = shareMsg; return false; }
+        if (!Share(character, container, out string shareMsg, isAdmin)) { error = shareMsg; return false; }
         entry = FindEntry(container);
         if (entry is null) { error = "Share succeeded but the entry could not be found (report this)."; return false; }
         return true;
     }
 
-    public bool SetPermission(Entity character, Entity container, string permission, out string message)
+    public bool SetPermission(Entity character, Entity container, string permission, out string message, bool isAdmin = false)
     {
         permission = permission?.Trim().ToLowerInvariant();
         if (permission is not ("take" or "give" or "givetake"))
@@ -571,7 +622,7 @@ internal sealed class PublicStorageService
             message = "Permission must be one of: take (withdraw only), give (donation box), givetake (both).";
             return false;
         }
-        if (!TryGetOrShare(character, container, out var entry, out message)) return false;
+        if (!TryGetOrShare(character, container, isAdmin, out var entry, out message)) return false;
         entry.Permission = permission;
         SaveSync();
         message = $"Container is public with permission '{permission}' " + permission switch
@@ -583,10 +634,10 @@ internal sealed class PublicStorageService
         return true;
     }
 
-    public bool SetLimitHours(Entity character, Entity container, double hours, out string message)
+    public bool SetLimitHours(Entity character, Entity container, double hours, out string message, bool isAdmin = false)
     {
         if (hours < 0) { message = "Hours must be 0 (no window) or positive."; return false; }
-        if (!TryGetOrShare(character, container, out var entry, out message)) return false;
+        if (!TryGetOrShare(character, container, isAdmin, out var entry, out message)) return false;
         entry.LimitHours = hours;
         if (hours > 0 && entry.LimitWithdrawStacks <= 0) entry.LimitWithdrawStacks = 1; // sensible default: 1 stack per window
         if (hours == 0) { entry.LimitWithdrawStacks = 0; entry.Usage.Clear(); }
@@ -597,10 +648,10 @@ internal sealed class PublicStorageService
         return true;
     }
 
-    public bool SetLimitWithdrawal(Entity character, Entity container, int stacks, out string message)
+    public bool SetLimitWithdrawal(Entity character, Entity container, int stacks, out string message, bool isAdmin = false)
     {
         if (stacks < 0) { message = "Stacks must be 0 (unlimited) or positive."; return false; }
-        if (!TryGetOrShare(character, container, out var entry, out message)) return false;
+        if (!TryGetOrShare(character, container, isAdmin, out var entry, out message)) return false;
         entry.LimitWithdrawStacks = stacks;
         if (stacks > 0 && entry.LimitHours <= 0) entry.LimitHours = 24; // sensible default window
         if (stacks == 0) { entry.LimitHours = 0; entry.Usage.Clear(); }
@@ -611,7 +662,7 @@ internal sealed class PublicStorageService
         return true;
     }
 
-    public bool SetCost(Entity character, Entity container, int itemGuid, int amount, out string message)
+    public bool SetCost(Entity character, Entity container, int itemGuid, int amount, out string message, bool isAdmin = false)
     {
         if (itemGuid != 0 && (amount <= 0))
         {
@@ -623,7 +674,7 @@ internal sealed class PublicStorageService
             message = $"Unknown item id {itemGuid}. Find the right id with: .uriel finditem <name>";
             return false;
         }
-        if (!TryGetOrShare(character, container, out var entry, out message)) return false;
+        if (!TryGetOrShare(character, container, isAdmin, out var entry, out message)) return false;
         entry.CostItemGuid = itemGuid;
         entry.CostAmount = itemGuid == 0 ? 0 : amount;
         SaveSync();

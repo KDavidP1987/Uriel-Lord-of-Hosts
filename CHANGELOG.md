@@ -8,6 +8,34 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.6.0] - 2026-06-07
+
+### Added — bulk visibility & control
+- **`.uriel shared`** now shows each of your public containers with its FULL
+  rule set (class, permission, limits, cost) — the "what of mine does Uriel
+  affect" query.
+- **`.uriel unsharemine`** — player bulk shutdown: reverts every container
+  you shared (or that your castle team controls) back to private in one
+  command; purges your stale entries.
+- **`.uriel sharedall [name|steamId]`** (admin) — optional player filter;
+  player resolution accepts a character-name fragment (must be unique) or a
+  literal steamId.
+- **`.uriel unshareplayer <name|steamId>`** (admin) — bulk shutdown of ALL of
+  one player's shares.
+- **Admin override on targeted containers:** admins can now aim at ANY
+  container and use `.uriel share [modifiers]` to force/adjust its sharing
+  settings (unshare-by-aim already worked). Players remain limited to
+  containers they control.
+
+### Notes — admin enable/disable (existing, now documented prominently)
+- `PublicStorage.Enabled` (config) is the feature-wide kill switch: commands
+  refuse, enforcement patches go inert, and on restart shared containers
+  come up as normal private chests (the boot re-apply skips). Admin cleanup
+  commands (`sharedall`/`unshareall`/`unshareplayer`) intentionally still
+  work while disabled. `PublicStorage.PrisonEnabled` is the independent
+  prison-cell switch. BepInEx reads config at boot — changes need a server
+  restart.
+
 ## [0.5.0] - 2026-06-07
 
 ### Added — public prison cells (experimental)

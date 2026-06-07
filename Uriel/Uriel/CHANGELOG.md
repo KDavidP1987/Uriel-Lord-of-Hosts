@@ -3,6 +3,14 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.6.0 (2026-06-07)
+
+- `.uriel shared` now lists your public containers with their full rules;
+  `.uriel unsharemine` reverts ALL of yours in one command.
+- Admins: `.uriel sharedall [player]` filter, `.uriel unshareplayer <player>`
+  bulk shutdown, and aim + `.uriel share`/`.uriel unshare` now override any
+  container's settings.
+
 ## 0.5.0 (2026-06-07)
 
 - Public PRISON CELLS (experimental): `.uriel share` a cell to let anyone

@@ -80,10 +80,12 @@ internal static class ShareCommands
         }
 
         // ---- Share (if needed), then apply modifiers in the order given. ----
+        // Admins may share/adjust ANY container (override); players only their own.
+        bool isAdmin = ctx.User.IsAdmin;
         bool wasShared = Core.PublicStorage.IsShared(container);
         if (!wasShared)
         {
-            if (!Core.PublicStorage.Share(character, container, out string shareMsg)) { ctx.Reply(shareMsg); return; }
+            if (!Core.PublicStorage.Share(character, container, out string shareMsg, isAdmin)) { ctx.Reply(shareMsg); return; }
             ctx.Reply(shareMsg);
         }
         else if (actions.Count == 0)
@@ -96,10 +98,10 @@ internal static class ShareCommands
         {
             string message = a.Kind switch
             {
-                "permission" => Msg(Core.PublicStorage.SetPermission(character, container, a.S, out var m), m),
-                "limithours" => Msg(Core.PublicStorage.SetLimitHours(character, container, a.D, out var m), m),
-                "limitwithdrawal" => Msg(Core.PublicStorage.SetLimitWithdrawal(character, container, a.A, out var m), m),
-                "cost" => Msg(Core.PublicStorage.SetCost(character, container, a.A, a.B, out var m), m),
+                "permission" => Msg(Core.PublicStorage.SetPermission(character, container, a.S, out var m, isAdmin), m),
+                "limithours" => Msg(Core.PublicStorage.SetLimitHours(character, container, a.D, out var m, isAdmin), m),
+                "limitwithdrawal" => Msg(Core.PublicStorage.SetLimitWithdrawal(character, container, a.A, out var m, isAdmin), m),
+                "cost" => Msg(Core.PublicStorage.SetCost(character, container, a.A, a.B, out var m, isAdmin), m),
                 _ => null,
             };
             if (message is not null) ctx.Reply(message);
@@ -120,7 +122,7 @@ internal static class ShareCommands
         ctx.Reply(message);
     }
 
-    [Command("shared", description: "List the containers YOU have made public.")]
+    [Command("shared", description: "List every container YOU have made public, with its full sharing rules.")]
     public static void Shared(ChatCommandContext ctx)
     {
         if (!Ready(ctx)) return;
@@ -131,26 +133,53 @@ internal static class ShareCommands
         {
             if (e.SharedBySteamId != steamId) continue;
             n++;
-            sb.AppendLine($"{n}. {new Stunlock.Core.PrefabGUID(e.PrefabGuid).GetPrefabName()} @ tile ({e.TileX},{e.TileY}) since {e.SharedAtUtc}");
+            sb.AppendLine($"{n}. {Core.PublicStorage.DescribeEntry(e)}");
         }
         ctx.Reply(n == 0
             ? "You have no public containers. Aim at one of your chests and use '.uriel share'."
-            : $"Your public containers:\n{sb}");
+            : $"Your public containers ({n}) — bulk revert with '.uriel unsharemine':\n{sb}");
     }
 
-    [Command("sharedall", adminOnly: true, description: "(admin) List ALL public containers on the server.")]
-    public static void SharedAll(ChatCommandContext ctx)
+    [Command("unsharemine", description: "Revert EVERY container you shared (or control) back to private, in bulk.")]
+    public static void UnshareMine(ChatCommandContext ctx)
+    {
+        if (!Ready(ctx)) return;
+        var (restored, purged) = Core.PublicStorage.UnshareMine(ctx.Event.SenderCharacterEntity);
+        ctx.Reply(restored + purged == 0
+            ? "You have no public containers to revert."
+            : $"Reverted {restored} of your container(s) to private" + (purged > 0 ? $"; purged {purged} stale entry(ies)." : "."));
+    }
+
+    [Command("sharedall", adminOnly: true, description: "(admin) List ALL public containers, or one player's: .uriel sharedall [name|steamId]")]
+    public static void SharedAll(ChatCommandContext ctx, string playerFilter = null)
     {
         if (!Core.IsReady) { ctx.Reply("Uriel is not yet initialized."); return; }
-        var entries = Core.PublicStorage.Entries;
-        if (entries.Count == 0) { ctx.Reply("No public containers on the server."); return; }
-        var sb = new StringBuilder();
-        for (int i = 0; i < entries.Count; i++)
+        ulong filterId = 0;
+        if (!string.IsNullOrWhiteSpace(playerFilter))
         {
-            var e = entries[i];
-            sb.AppendLine($"{i + 1}. {new Stunlock.Core.PrefabGUID(e.PrefabGuid).GetPrefabName()} @ tile ({e.TileX},{e.TileY}) by {e.SharedBySteamId} [{e.ContainerClass}]");
+            if (!EntityExtensions.TryResolvePlayer(playerFilter, out filterId, out string name, out string err)) { ctx.Reply(err); return; }
+            ctx.Reply($"Filtering by {name} ({filterId}).");
         }
-        ctx.Reply($"Public containers ({entries.Count}):\n{sb}");
+        var sb = new StringBuilder();
+        int n = 0;
+        foreach (var e in Core.PublicStorage.Entries)
+        {
+            if (filterId != 0 && e.SharedBySteamId != filterId) continue;
+            n++;
+            sb.AppendLine($"{n}. {Core.PublicStorage.DescribeEntry(e)} by {e.SharedBySteamId}");
+        }
+        ctx.Reply(n == 0 ? "No matching public containers." : $"Public containers ({n}):\n{sb}");
+    }
+
+    [Command("unshareplayer", adminOnly: true, description: "(admin) Revert ALL of one player's public containers: .uriel unshareplayer <name|steamId>")]
+    public static void UnsharePlayer(ChatCommandContext ctx, string nameOrId)
+    {
+        if (!Core.IsReady) { ctx.Reply("Uriel is not yet initialized."); return; }
+        if (!EntityExtensions.TryResolvePlayer(nameOrId, out ulong steamId, out string name, out string err)) { ctx.Reply(err); return; }
+        var (restored, purged) = Core.PublicStorage.UnshareBySteamId(steamId);
+        ctx.Reply(restored + purged == 0
+            ? $"{name} ({steamId}) has no public containers."
+            : $"Reverted {restored} container(s) shared by {name} ({steamId})" + (purged > 0 ? $"; purged {purged} stale entry(ies)." : "."));
     }
 
     [Command("unshareall", adminOnly: true, description: "(admin) Revert EVERY public container to private and clear the registry.")]
