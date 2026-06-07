@@ -8,6 +8,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.12.2] - 2026-06-07
+
+### Fixed — forced-dismantle fallback completes the swap
+- Live test of v0.12.1: the vanilla dismantle event only STARTS the game's
+  timed dismantle ability (visible as `AB_Interact_Dismantle_Short` casts in
+  the log), which never completes outside real build-mode — so swaps aborted.
+  Meanwhile `.uriel stairpurge` proved that destroying the root AND its
+  segments genuinely frees the cell (the user hand-built immediately after,
+  no restart). The swap now tries the vanilla dismantle briefly, then
+  **force-dismantles**: manual full-cost refund to the player + purge of the
+  stair's root and segments at the spot, then fires the build event
+  (consuming the refund from local inventory). Net zero either way.
+- **Two-half staircases** (live finding: a tall staircase is two stacked
+  placements): verification now looks for the TARGET style near the spot
+  instead of "the closest stair", which could be the untouched other half.
+  Swap each half separately — `.uriel stairswap` converts the half you aim at.
+
 ## [0.12.1] - 2026-06-07
 
 ### Fixed — removal goes through the vanilla pipeline too

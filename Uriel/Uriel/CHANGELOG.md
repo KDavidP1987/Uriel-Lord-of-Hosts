@@ -3,6 +3,13 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.12.2 (2026-06-07)
+
+- Fix: stair swaps complete now — if the game's own dismantle doesn't finish
+  (it usually doesn't outside build mode), Uriel removes the stair itself and
+  refunds you its full material cost before building the new style. Tall
+  staircases are two stacked halves — swap each half (aim at it).
+
 ## 0.12.1 (2026-06-07)
 
 - Fix: stair swaps no longer leave invisible "ghost" stairs — removal now
