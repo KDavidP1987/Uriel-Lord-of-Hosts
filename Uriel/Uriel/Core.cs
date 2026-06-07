@@ -60,6 +60,7 @@ internal static class Core
             ServerScriptMapper = server.GetExistingSystemManaged<ServerScriptMapper>();
 
             // Feature services initialize here (after game data is loaded), in dependency order.
+            Tick.StartDriver(); // per-frame driver (deferred actions, e.g. the share-resync blink)
             ItemCatalog = new ItemCatalogService();
             ItemCatalog.Build();
             StairSwap = new StairSwapService();

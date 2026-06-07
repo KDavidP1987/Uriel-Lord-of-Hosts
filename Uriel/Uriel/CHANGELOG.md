@@ -3,6 +3,12 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.8.2 (2026-06-07)
+
+- Fix: share/unshare really does take effect immediately for online players
+  now (the previous fix wasn't enough — containers briefly blink as they
+  refresh for everyone).
+
 ## 0.8.1 (2026-06-07)
 
 - Fix: sharing/unsharing now takes effect immediately for players already

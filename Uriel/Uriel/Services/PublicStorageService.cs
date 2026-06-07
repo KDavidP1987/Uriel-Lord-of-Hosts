@@ -344,16 +344,39 @@ internal sealed class PublicStorageService
     }
 
     /// <summary>
-    /// Force the server to re-send this entity's state to EVERY connected client
-    /// (v0.8.1, live-test finding): runtime component mutations don't reliably
-    /// reach already-connected clients — boot-applied shares worked while
-    /// runtime share/unshare changes appeared stale until relog. Clearing
-    /// UpToDateUserBitMask marks all users as out-of-date.
+    /// Force connected clients to refresh this entity (v0.8.2). The v0.8.1
+    /// UpToDateUserBitMask clear was NOT sufficient: the sharedebug dump proved
+    /// the server state perfect while the stranger's client kept casting the
+    /// DisabledDummy interact — clients only re-evaluate a container's
+    /// interactability when the entity is (re)streamed to them, which is why
+    /// boot-applied shares always worked. So: blink the entity through the
+    /// game's own streaming path — Disabled now, re-enabled a few frames later
+    /// (the proximity streamer may even re-enable it first; both paths are
+    /// guarded). Clients drop the entity and re-receive it with fresh state.
     /// </summary>
     static void ForceResync(Entity entity)
     {
         if (entity.Has<ProjectM.Network.UpToDateUserBitMask>())
             entity.With((ref ProjectM.Network.UpToDateUserBitMask m) => m.Value = default);
+        try
+        {
+            if (!entity.Has<Disabled>())
+            {
+                Core.EntityManager.AddComponent<Disabled>(entity);
+                Entity captured = entity;
+                Tick.RunLater(3, () =>
+                {
+                    if (captured.Exists() && captured.Has<Disabled>())
+                        Core.EntityManager.RemoveComponent<Disabled>(captured);
+                });
+                if (Settings.VerboseLogging.Value)
+                    Core.Log.LogInfo($"[Uriel SHARE] resync blink: {entity.GetPrefabGuid().GetPrefabName()}.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Core.Log.LogWarning($"[Uriel SHARE] resync blink failed: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -616,6 +639,7 @@ internal sealed class PublicStorageService
         ApplyPublicTeam(container, newEntry); // captures the heart anchor into the entry
         _entries.Add(newEntry);
         SaveSync();
+        Core.Log.LogInfo($"[Uriel SHARE] shared {container.GetPrefabGuid().GetPrefabName()} at ({tile.Tile.x},{tile.Tile.y}) class={cls} by {character.GetSteamId()}.");
         message = cls == "prison"
             ? $"{container.GetPrefabGuid().GetPrefabName()} is now PUBLIC — anyone can tend the prisoner (feed, extract blood) or charm them out as their own subdued follower. '.uriel unshare' to revert."
             : $"{container.GetPrefabGuid().GetPrefabName()} is now PUBLIC — anyone on the server can use it. Aim at it and use '.uriel unshare' to revert.";

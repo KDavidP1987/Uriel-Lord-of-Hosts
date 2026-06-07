@@ -8,6 +8,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.8.2] - 2026-06-07
+
+### Fixed — the client-refresh mechanism, properly this time
+- The v0.8.1 `UpToDateUserBitMask` clear was insufficient: a live `sharedebug`
+  dump proved the server state perfect (neutral singleton team, severed link)
+  while the stranger's client kept casting the DisabledDummy interact —
+  **clients only re-evaluate a container's interactability when the entity is
+  (re)streamed to them**, which is why boot-applied shares always worked and
+  runtime changes appeared dead.
+- Share/unshare now **blink** the entity through the game's own streaming
+  path: `Disabled` for ~3 frames, then re-enabled — every client drops the
+  entity and re-receives it with fresh state (prisoner included for cells).
+  Powered by a new per-frame tick driver (Beelzebub Heartbeat pattern:
+  IL2CPP-injected MonoBehaviour).
+- `.uriel share` now logs to the server log like unshare does (timeline
+  reconstruction during testing).
+
 ## [0.8.1] - 2026-06-07
 
 ### Fixed — runtime share/unshare changes now reach connected clients
