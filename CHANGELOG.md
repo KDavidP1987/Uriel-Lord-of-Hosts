@@ -8,6 +8,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.8.1] - 2026-06-07
+
+### Fixed — runtime share/unshare changes now reach connected clients
+- **Boot-applied shares worked; runtime share/unshare appeared stale** to
+  already-connected players (live test: a chest shared before restart was
+  accessible at login, but unshare→re-share made it inaccessible). The
+  server only re-sends entity state it considers changed for networking —
+  share/unshare/re-apply now clear the entity's `UpToDateUserBitMask`,
+  forcing a fresh sync to every connected client.
+- **Strangers couldn't subdue/charm the prisoner out of a shared cell**
+  (limited access): that interaction validates against the PRISONER's own
+  team, not just the cell's. Sharing a cell now neutralizes the imprisoned
+  unit's team as well; unsharing restores it with the cell's.
+- New admin diagnostic: **`.uriel sharedebug`** — aim at any container to
+  dump its live state (team values, neutral-singleton check, castle-link
+  status, heart-anchor resolution, prisoner team) to chat + server log.
+
 ## [0.8.0] - 2026-06-07
 
 ### Fixed — sharing now works regardless of server loot settings

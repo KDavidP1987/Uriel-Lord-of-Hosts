@@ -3,6 +3,12 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.8.1 (2026-06-07)
+
+- Fix: sharing/unsharing now takes effect immediately for players already
+  online (previously could require a relog).
+- Fix: prisoners in a shared cell can now be subdued/charmed out by others.
+
 ## 0.8.0 (2026-06-07)
 
 - Fix: shared chests/prison cells are now accessible to other players even

@@ -182,6 +182,17 @@ internal static class ShareCommands
             : $"Reverted {restored} container(s) shared by {name} ({steamId})" + (purged > 0 ? $"; purged {purged} stale entry(ies)." : "."));
     }
 
+    [Command("sharedebug", adminOnly: true, description: "(admin) Dump the aimed container's live sharing state (team, castle link, prisoner) for diagnostics.")]
+    public static void ShareDebug(ChatCommandContext ctx)
+    {
+        if (!Core.IsReady) { ctx.Reply("Uriel is not yet initialized."); return; }
+        var container = Core.PublicStorage.ResolveTargetContainer(ctx.Event.SenderCharacterEntity, out string err);
+        if (container == Unity.Entities.Entity.Null) { ctx.Reply(err); return; }
+        string text = Core.PublicStorage.BuildDebugText(container);
+        Core.Log.LogInfo($"[Uriel SHARE][debug]\n{text}");
+        ctx.Reply(text);
+    }
+
     [Command("unshareall", adminOnly: true, description: "(admin) Revert EVERY public container to private and clear the registry.")]
     public static void UnshareAll(ChatCommandContext ctx)
     {

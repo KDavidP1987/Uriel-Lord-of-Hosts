@@ -321,6 +321,41 @@ internal sealed class PublicStorageService
     public bool CanResolvePublicTeam() =>
         TryResolveNeutralTeamEntity(out _) || TryResolveDonorTeam();
 
+    /// <summary>The Team values + TeamReference entity to use for PUBLIC containers.</summary>
+    bool TryGetPublicTeam(out int teamValue, out int factionIndex, out Entity teamRefEntity)
+    {
+        if (TryResolveNeutralTeamEntity(out Entity neutralTeam)
+            && neutralTeam.TryGetComponent<TeamData>(out var teamData))
+        {
+            teamValue = teamData.TeamValue;
+            factionIndex = -1;
+            teamRefEntity = neutralTeam;
+            return true;
+        }
+        if (TryResolveDonorTeam())
+        {
+            teamValue = _donorTeam.Value;
+            factionIndex = _donorTeam.FactionIndex;
+            teamRefEntity = _donorTeamRefEntity;
+            return true;
+        }
+        teamValue = 0; factionIndex = 0; teamRefEntity = Entity.Null;
+        return false;
+    }
+
+    /// <summary>
+    /// Force the server to re-send this entity's state to EVERY connected client
+    /// (v0.8.1, live-test finding): runtime component mutations don't reliably
+    /// reach already-connected clients — boot-applied shares worked while
+    /// runtime share/unshare changes appeared stale until relog. Clearing
+    /// UpToDateUserBitMask marks all users as out-of-date.
+    /// </summary>
+    static void ForceResync(Entity entity)
+    {
+        if (entity.Has<ProjectM.Network.UpToDateUserBitMask>())
+            entity.With((ref ProjectM.Network.UpToDateUserBitMask m) => m.Value = default);
+    }
+
     /// <summary>
     /// Make the container PUBLIC (v0.8.0 — full KindredSchematics neutral recipe):
     ///  1. remember the castle heart by tile (entry) — connection is about to go;
@@ -345,23 +380,34 @@ internal sealed class PublicStorageService
         }
 
         // 2. neutral team
-        if (TryResolveNeutralTeamEntity(out Entity neutralTeam)
-            && neutralTeam.TryGetComponent<TeamData>(out var teamData))
+        if (TryGetPublicTeam(out int teamValue, out int factionIndex, out Entity teamRefEntity))
         {
-            container.With((ref Team t) => { t.Value = teamData.TeamValue; t.FactionIndex = -1; });
-            container.With((ref TeamReference tr) => tr.Value._Value = neutralTeam);
-        }
-        else if (TryResolveDonorTeam())
-        {
-            var donorTeam = _donorTeam;
-            var donorRef = _donorTeamRefEntity;
-            container.With((ref Team t) => { t.Value = donorTeam.Value; t.FactionIndex = donorTeam.FactionIndex; });
-            container.With((ref TeamReference tr) => tr.Value._Value = donorRef);
+            container.With((ref Team t) => { t.Value = teamValue; t.FactionIndex = factionIndex; });
+            container.With((ref TeamReference tr) => tr.Value._Value = teamRefEntity);
         }
 
         // 3. sever the castle link (the client-side gate)
         if (container.Has<CastleHeartConnection>())
             container.With((ref CastleHeartConnection c) => c.CastleHeartEntity = Entity.Null);
+
+        // 4. prison cells: the subdue/charm interaction validates against the
+        //    PRISONER's own team, not just the cell's (v0.8.1 live-test finding:
+        //    a stranger could open a shared cell but not take the prisoner) —
+        //    neutralize the imprisoned unit too.
+        if (container.TryGetComponent<PrisonCell>(out var prisonCell))
+        {
+            Entity prisoner = prisonCell.ImprisonedEntity.GetEntityOnServer();
+            if (prisoner.Exists() && prisoner.Has<Team>())
+            {
+                prisoner.With((ref Team t) => { t.Value = teamValue; t.FactionIndex = factionIndex; });
+                if (prisoner.Has<TeamReference>())
+                    prisoner.With((ref TeamReference tr) => tr.Value._Value = teamRefEntity);
+                ForceResync(prisoner);
+            }
+        }
+
+        // 5. push the new state to already-connected clients
+        ForceResync(container);
     }
 
     /// <summary>
@@ -446,6 +492,22 @@ internal sealed class PublicStorageService
         var refEntity = donorRef.Value._Value;
         container.With((ref Team t) => { t.Value = donorTeam.Value; t.FactionIndex = donorTeam.FactionIndex; });
         container.With((ref TeamReference tr) => tr.Value._Value = refEntity);
+
+        // Prison cells: restore the prisoner's team alongside the cell's (it was
+        // neutralized on share so strangers could subdue/charm them out).
+        if (container.TryGetComponent<PrisonCell>(out var prisonCell))
+        {
+            Entity prisoner = prisonCell.ImprisonedEntity.GetEntityOnServer();
+            if (prisoner.Exists() && prisoner.Has<Team>())
+            {
+                prisoner.With((ref Team t) => { t.Value = donorTeam.Value; t.FactionIndex = donorTeam.FactionIndex; });
+                if (prisoner.Has<TeamReference>())
+                    prisoner.With((ref TeamReference tr) => tr.Value._Value = refEntity);
+                ForceResync(prisoner);
+            }
+        }
+
+        ForceResync(container); // push restored state to connected clients
         Core.Log.LogInfo($"[Uriel SHARE] unshare: reconnected heart + restored team on {container.GetPrefabGuid().GetPrefabName()} from {(donor == heart ? "castle heart" : "sibling container")} (Team.Value={donorTeam.Value}).");
         return true;
     }
@@ -881,6 +943,43 @@ internal sealed class PublicStorageService
             sb.Append($", cost {entry.CostAmount}× {new PrefabGUID(entry.CostItemGuid).GetPrefabName()} per stack");
         sb.Append($". Shared by {entry.SharedBySteamId} since {entry.SharedAtUtc}.");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Diagnostic dump of a container's live sharing-relevant state (v0.8.1) —
+    /// turns "he can't click it" reports into facts. Admin command: .uriel sharedebug
+    /// </summary>
+    public string BuildDebugText(Entity container)
+    {
+        var sb = new System.Text.StringBuilder();
+        var entry = FindEntry(container);
+        sb.AppendLine($"{container.GetPrefabGuid().GetPrefabName()} [{ClassifyContainer(container)}] registered={(entry is not null ? "YES" : "no")}");
+        if (container.TryGetComponent<Team>(out var team))
+            sb.AppendLine($"Team.Value={team.Value} FactionIndex={team.FactionIndex}");
+        if (container.TryGetComponent<TeamReference>(out var teamRef))
+        {
+            var refEnt = teamRef.Value._Value;
+            sb.AppendLine($"TeamReference={refEnt} exists={refEnt.Exists()} isNeutralSingleton={refEnt.Exists() && refEnt.Has<NeutralTeam>()}");
+        }
+        if (container.TryGetComponent<CastleHeartConnection>(out var conn))
+        {
+            var heart = conn.CastleHeartEntity.GetEntityOnServer();
+            sb.AppendLine($"CastleHeartConnection={(heart == Entity.Null ? "SEVERED (null)" : $"{heart} exists={heart.Exists()}")}");
+        }
+        else sb.AppendLine("CastleHeartConnection: component missing");
+        if (entry is not null)
+            sb.AppendLine($"Entry: heartAnchor={(entry.HasHeartTile ? $"({entry.HeartTileX},{entry.HeartTileY}) resolves={FindHeartByTile(entry.HeartTileX, entry.HeartTileY).Exists()}" : "NONE")} policy=[{entry.Permission}{(entry.CostItemGuid != 0 ? " cost" : "")}{(entry.LimitWithdrawStacks > 0 ? " limit" : "")}]");
+        if (container.TryGetComponent<PrisonCell>(out var cell))
+        {
+            Entity prisoner = cell.ImprisonedEntity.GetEntityOnServer();
+            if (prisoner.Exists())
+            {
+                prisoner.TryGetComponent<Team>(out var pTeam);
+                sb.AppendLine($"Prisoner: {prisoner.GetPrefabGuid().GetPrefabName()} Team.Value={pTeam.Value}");
+            }
+            else sb.AppendLine("Prisoner: none/empty cell");
+        }
+        return sb.ToString().TrimEnd();
     }
 
     // ================================================================ move-event enforcement (v0.3.0)
