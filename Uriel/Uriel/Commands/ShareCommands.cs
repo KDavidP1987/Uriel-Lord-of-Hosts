@@ -182,6 +182,35 @@ internal static class ShareCommands
             : $"Reverted {restored} container(s) shared by {name} ({steamId})" + (purged > 0 ? $"; purged {purged} stale entry(ies)." : "."));
     }
 
+    [Command("takeprisoner", description: "Take the prisoner from the SHARED cell you're aiming at — they're subdued and released to you (have Dominating Presence ready).")]
+    public static void TakePrisoner(ChatCommandContext ctx)
+    {
+        if (!Core.IsReady) { ctx.Reply("Uriel is not yet initialized."); return; }
+        if (!Settings.PublicStorage_Enabled.Value || !Settings.PublicPrison_Enabled.Value)
+        {
+            ctx.Reply("Prison-cell sharing is disabled by the server admin.");
+            return;
+        }
+        var character = ctx.Event.SenderCharacterEntity;
+        var container = Core.PublicStorage.ResolveTargetContainer(character, out string err);
+        if (container == Unity.Entities.Entity.Null) { ctx.Reply(err); return; }
+
+        // Authorization: the cell must be SHARED (then anyone may take), or the
+        // caller controls the castle / is an admin.
+        var entry = Core.PublicStorage.IsShared(container) ? "shared" : null;
+        bool allowed = entry is not null
+            || ctx.User.IsAdmin
+            || Services.PublicStorageService.CharacterControlsContainer(character, container);
+        if (!allowed)
+        {
+            ctx.Reply("That cell isn't shared — only its owners (or admins) can take the prisoner.");
+            return;
+        }
+
+        Services.PrisonerService.TakePrisoner(character, ctx.Event.SenderUserEntity, container, out string message);
+        ctx.Reply(message);
+    }
+
     [Command("sharedebug", adminOnly: true, description: "(admin) Dump the aimed container's live sharing state (team, castle link, prisoner) for diagnostics.")]
     public static void ShareDebug(ChatCommandContext ctx)
     {

@@ -3,6 +3,13 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.10.0 (2026-06-07)
+
+- NEW: `.uriel takeprisoner` — aim at a shared prison cell to take its
+  prisoner: they're subdued and released to you (bring Dominating Presence
+  to escort them). The game's own subdue button can't be shown to non-owners
+  (it's locked inside the game client), so Uriel does it via command.
+
 ## 0.9.0 (2026-06-07)
 
 - Fix: sharing a chest now takes effect immediately for online players — no

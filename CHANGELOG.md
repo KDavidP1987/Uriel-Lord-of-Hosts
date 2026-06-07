@@ -8,6 +8,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.10.0] - 2026-06-07
+
+### Added — `.uriel takeprisoner` (experimental)
+- Aim at a **shared** prison cell (owners/admins: any cell) and take its
+  prisoner: they're subdued and released to you — have Dominating Presence
+  ready to escort them home. Two-layer mechanism: a synthesized vanilla
+  `InteractWithPrisonerEvent(Charm)` first (100% vanilla behavior if the
+  system accepts it from the neutral cell), with an automatic manual-charm
+  fallback (`AB_Charm_Active_Human_Buff` owned by the taker; imprisoned
+  state + cell links cleared via the PrisonerExchange component recipe).
+  Gated by `PublicStorage.PrisonEnabled`.
+
+### Research verdict — native subdue button for non-owners: impossible server-side
+- Deep-dive confirmed the prison UI's SUBDUE/KILL buttons are hard-gated in
+  CLIENT code by team match: feed/extract are inventory-recipe surfaces
+  (visible with shared access), while subdue is an interact-event the client
+  only offers to the cell's castle team. PalacePrivileges — the most thorough
+  permissions mod — has a `prison.subdue` privilege that works only for
+  same-clan players, and treats a cross-team charm event as CHEAT detection.
+  No replicated state can reveal the button; hence the command approach.
+
 ## [0.9.0] - 2026-06-07
 
 ### Fixed — storage shares now take effect live; stairs stay editable

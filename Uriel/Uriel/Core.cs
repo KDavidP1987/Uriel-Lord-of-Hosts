@@ -19,6 +19,7 @@ internal static class Core
     public static EntityManager EntityManager { get; private set; }
     public static PrefabCollectionSystem PrefabCollectionSystem { get; private set; }
     public static ServerScriptMapper ServerScriptMapper { get; private set; }
+    public static DebugEventsSystem DebugEventsSystem { get; private set; }
     public static ServerGameManager ServerGameManager => ServerScriptMapper.GetServerGameManager();
 
     public static PublicStorageService PublicStorage { get; private set; }
@@ -58,6 +59,7 @@ internal static class Core
             EntityManager = server.EntityManager;
             PrefabCollectionSystem = prefabSystem;
             ServerScriptMapper = server.GetExistingSystemManaged<ServerScriptMapper>();
+            DebugEventsSystem = server.GetExistingSystemManaged<DebugEventsSystem>();
 
             // Feature services initialize here (after game data is loaded), in dependency order.
             Tick.StartDriver(); // per-frame driver (deferred actions, e.g. the share-resync blink)

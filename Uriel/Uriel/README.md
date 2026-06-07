@@ -48,6 +48,8 @@ position/rotation/ownership.
     .uriel share LimitHours 6 Cost 123456789 100 Permission Take
 .uriel paychest                   → aim at a PRIVATE chest: receives payments
 .uriel finditem <name>            → search item ids for the cost command
+.uriel takeprisoner               → take the prisoner from a SHARED cell
+                                    (subdued + released to you)
 .uriel unsharemine                → revert ALL of your shares in one command
 .uriel stairswap <style|next>     → re-skin the aimed stair (stone1/2/3,
                                     gloomrot, projectk, strongblade)

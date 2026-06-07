@@ -27,6 +27,28 @@ neutral-team cell should let strangers use the full vanilla prison surface:
   the move-event policy applies, and deposits respect the slot restriction
   (only feeding consumables; see ItemFitsRestriction).
 
+### Subdue research verdict + `.uriel takeprisoner` (v0.10.0)
+
+Deep-dive (2026-06-07) settled the "can the native subdue button appear for
+non-owners" question: **no.** Feed/extract are inventory-RECIPE surfaces
+(replicated; visible with shared access), but SUBDUE/KILL are
+`InteractWithPrisonerEvent` interactions whose buttons the CLIENT only offers
+when the player's team matches the cell's castle team. PalacePrivileges has a
+`prison.subdue` privilege that works only same-clan, and its
+`Detected_PrisonBreaker` anti-cheat fires on cross-team charm events —
+proving a legitimate client never sends one for a foreign cell. Only a
+client-side mod could reveal the button; out of scope for a server-only mod.
+
+Instead: **`.uriel takeprisoner`** (aim at a shared cell; owners/admins any
+cell). Layer A synthesizes the vanilla `InteractWithPrisonerEvent`
+(`EventHelper.PrisonInteraction.Charm`) from the taker — full vanilla charm
+flow if the system accepts it from a neutral cell. Layer B (auto-fallback if
+the prisoner is still `Imprisoned` after ~20 frames): strip `ImprisonedBuff`
+(1603329680) + `Imprisoned`, clear `PrisonCell.ImprisonedEntity` /
+`Prisonstation.HasPrisoner`, apply `AB_Charm_Active_Human_Buff` (1303169868)
+re-owned to the taker. Validation question for live test: which layer fires
+(log says), and does the charmed prisoner follow the taker properly.
+
 ## Live validation results (v0.2.1, 2026-06-06)
 
 Two-player test confirmed the team-swap mechanism: a non-clan player got the
