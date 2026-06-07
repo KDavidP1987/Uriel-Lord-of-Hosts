@@ -8,6 +8,29 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.4.0] - 2026-06-06
+
+### Added
+- **Stacked share modifiers, any order** — e.g.
+  `.uriel share LimitHours 6 Cost 123456789 100 Permission Take`. All tokens
+  are validated BEFORE anything is applied (one bad modifier = nothing
+  changes). Single-modifier syntax unchanged. (VCF 0.10.x has no rest-of-line
+  parameter, so this is a hand-rolled token parser over optional args.)
+
+### Changed — payment delivery is now capacity- and restriction-safe
+- **Capacity pre-check:** payment is collected from the taker only after a
+  destination with room for the ENTIRE amount is found (counts empty slots ×
+  max stack + same-item headroom via `ItemData.MaxAmount`) — a full chest can
+  no longer cause partial transfers, duplication, or item loss.
+- **Specialized stashes excluded:** containers with
+  `InventoryInstanceElement.RestrictedCategory/RestrictedType` (lumber, seed,
+  … stashes) are never used as payment destinations, and `.uriel paychest`
+  refuses them outright (general storage only).
+- **Delivery cascade:** designated pay chest → the shared container itself →
+  NEAREST general non-shared storage on the same castle heart → if everything
+  is full, the withdrawal is denied gracefully and the taker keeps their
+  payment (clear message; never a crash).
+
 ## [0.3.0] - 2026-06-06
 
 ### Added — sharing policy modifiers (experimental)

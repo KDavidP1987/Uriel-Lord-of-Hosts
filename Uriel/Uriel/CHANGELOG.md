@@ -3,6 +3,16 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.4.0 (2026-06-06)
+
+- Share modifiers now stack in one command, any order:
+  `.uriel share LimitHours 6 Cost 123456789 100 Permission Take`.
+- Payment safety: payments only collect when a destination can hold the full
+  amount; specialized stashes (lumber/seed/…) are never used; if the pay chest
+  is full, payment falls back to the shared chest, then the nearest general
+  chest in the owner's castle — and if everything's full the trade is simply
+  refused (taker keeps their items).
+
 ## 0.3.0 (2026-06-06)
 
 - Sharing rules (experimental): `.uriel share permission take|give|givetake`,

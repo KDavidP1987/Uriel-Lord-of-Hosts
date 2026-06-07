@@ -38,6 +38,8 @@ already swap.
 .uriel share limithours <h>       → rolling window for the withdrawal limit
 .uriel share limitwithdrawal <n>  → stacks a player may take per window
 .uriel share cost <itemId> <amt>  → charge per stack withdrawn (0 0 = free)
+  ↳ modifiers STACK in one command, any order:
+    .uriel share LimitHours 6 Cost 123456789 100 Permission Take
 .uriel paychest                   → aim at a PRIVATE chest: receives payments
 .uriel finditem <name>            → search item ids for the cost command
 .uriel sharedall                  → (admin) list all public containers

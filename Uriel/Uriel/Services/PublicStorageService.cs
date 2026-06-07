@@ -606,6 +606,16 @@ internal sealed class PublicStorageService
             message = "That container is public — payments must go to a PRIVATE chest. Aim at a private one.";
             return false;
         }
+        if (ClassifyContainer(container) != "storage")
+        {
+            message = "Pay chests must be regular storage (not prison cells or coffins).";
+            return false;
+        }
+        if (!IsGeneralStorage(container))
+        {
+            message = "Pay chests must be GENERAL storage — specialized stashes (lumber, seeds, …) only accept certain items and can't safely receive payments.";
+            return false;
+        }
         if (!container.TryGetComponent<TilePosition>(out var tile))
         {
             message = "Container has no tile position; cannot register it.";
@@ -790,9 +800,114 @@ internal sealed class PublicStorageService
     static string FormatSpan(TimeSpan span) =>
         span.TotalHours >= 1 ? $"{(int)span.TotalHours}h {span.Minutes}m" : $"{span.Minutes}m";
 
+    // ---------------------------------------------------------------- payment routing (v0.4.0)
+
     /// <summary>
-    /// Charge the per-stack access cost: remove from the taker's inventory, deliver
-    /// to the owner's pay chest (fallback: the shared container itself).
+    /// Is this a GENERAL storage container (no item-type restriction)? Specialized
+    /// stashes (lumber, seeds, …) carry InventoryInstanceElement.RestrictedCategory != 0
+    /// or a RestrictedType — forcing the wrong item into those must never happen.
+    /// </summary>
+    public static bool IsGeneralStorage(Entity container)
+    {
+        if (!Core.ServerGameManager.TryGetBuffer<InventoryInstanceElement>(container, out var elements))
+            return false;
+        for (int i = 0; i < elements.Length; i++)
+        {
+            var e = elements[i];
+            if ((long)e.RestrictedCategory != 0) return false;
+            if (e.RestrictedType._Value != 0) return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// How many of <paramref name="itemGuid"/> still FIT in this container
+    /// (empty slots × max stack + headroom on same-item stacks)? Capacity is
+    /// pre-checked BEFORE any payment is collected so a full destination can
+    /// never produce a partial transfer or duplication.
+    /// </summary>
+    public static int CountFit(Entity container, PrefabGUID itemGuid)
+    {
+        if (!InventoryUtilities.TryGetInventoryEntity(Core.EntityManager, container, out Entity inv)) return 0;
+        if (!Core.ServerGameManager.TryGetBuffer<InventoryBuffer>(inv, out var buffer)) return 0;
+        int maxStack = 1;
+        try
+        {
+            if (Core.ServerGameManager.ItemLookupMap.TryGetValue(itemGuid, out ItemData data) && data.MaxAmount > 0)
+                maxStack = data.MaxAmount;
+        }
+        catch { /* unknown item: assume stack of 1 (conservative) */ }
+        int fit = 0;
+        for (int i = 0; i < buffer.Length; i++)
+        {
+            var slot = buffer[i];
+            if (slot.ItemType._Value == 0) fit += maxStack;
+            else if (slot.ItemType._Value == itemGuid._Value && slot.Amount < maxStack) fit += maxStack - slot.Amount;
+        }
+        return fit;
+    }
+
+    /// <summary>
+    /// Choose where a cost payment goes, capacity- and restriction-checked:
+    ///   1. the owner's designated pay chest;
+    ///   2. the shared container itself;
+    ///   3. the NEAREST general, non-shared storage container on the same castle
+    ///      heart (KindredCommands-style proximity fallback);
+    ///   4. nowhere → the withdrawal is denied gracefully (payer keeps everything).
+    /// </summary>
+    Entity PickPaymentDestination(PublicContainerEntry entry, PrefabGUID costItem, int amount)
+    {
+        var pay = ResolvePayChest(entry.SharedBySteamId);
+        if (pay != Entity.Null && IsGeneralStorage(pay) && CountFit(pay, costItem) >= amount) return pay;
+
+        var shared = ResolveEntry(entry);
+        if (shared != Entity.Null && IsGeneralStorage(shared) && CountFit(shared, costItem) >= amount) return shared;
+
+        if (shared != Entity.Null
+            && shared.TryGetComponent<CastleHeartConnection>(out var conn)
+            && shared.TryGetComponent<Unity.Transforms.Translation>(out var sharedPos))
+        {
+            Entity heart = conn.CastleHeartEntity.GetEntityOnServer();
+            var builder = new EntityQueryBuilder(Allocator.Temp)
+                .AddAll(new(Il2CppType.Of<InventoryOwner>(), ComponentType.AccessMode.ReadOnly))
+                .AddAll(new(Il2CppType.Of<TilePosition>(), ComponentType.AccessMode.ReadOnly))
+                .AddAll(new(Il2CppType.Of<CastleHeartConnection>(), ComponentType.AccessMode.ReadOnly))
+                .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
+            var query = Core.EntityManager.CreateEntityQuery(ref builder);
+            var entities = query.ToEntityArray(Allocator.Temp);
+            try
+            {
+                Entity best = Entity.Null;
+                float bestSq = float.MaxValue;
+                for (int i = 0; i < entities.Length; i++)
+                {
+                    var e = entities[i];
+                    if (e == shared) continue;
+                    if (!e.TryGetComponent<CastleHeartConnection>(out var c)
+                        || c.CastleHeartEntity.GetEntityOnServer() != heart) continue;     // same castle only
+                    if (FindEntry(e) is not null) continue;                                // never into a shared container
+                    if (ClassifyContainer(e) != "storage") continue;                       // no prisons/coffins
+                    if (!IsGeneralStorage(e)) continue;                                    // no specialized stashes
+                    if (CountFit(e, costItem) < amount) continue;                          // must fit ENTIRELY
+                    if (!e.TryGetComponent<Unity.Transforms.Translation>(out var t)) continue;
+                    float dx = t.Value.x - sharedPos.Value.x, dy = t.Value.y - sharedPos.Value.y, dz = t.Value.z - sharedPos.Value.z;
+                    float dsq = dx * dx + dy * dy + dz * dz;
+                    if (dsq < bestSq) { bestSq = dsq; best = e; }
+                }
+                if (best != Entity.Null) return best;
+            }
+            finally
+            {
+                entities.Dispose();
+            }
+        }
+        return Entity.Null;
+    }
+
+    /// <summary>
+    /// Charge the per-stack access cost. Destination is capacity-checked FIRST;
+    /// payment is only removed from the taker once a fitting destination exists,
+    /// and refunded if the final add unexpectedly fails. Never throws upward.
     /// </summary>
     bool TryCollectCost(PublicContainerEntry entry, Entity character, Entity userEntity, out string denyMsg)
     {
@@ -807,20 +922,23 @@ internal sealed class PublicStorageService
             return false;
         }
 
-        Entity payTarget = ResolvePayChest(entry.SharedBySteamId);
+        Entity payTarget = PickPaymentDestination(entry, costItem, entry.CostAmount);
         if (payTarget == Entity.Null)
-            payTarget = ResolveEntry(entry); // fallback: payment goes into the shared container
+        {
+            denyMsg = "No payment destination has room (pay chest, this container, and the castle's other general storage are all full) — tell the owner. No payment was taken.";
+            return false;
+        }
 
         if (!Core.ServerGameManager.TryRemoveInventoryItem(playerInv, costItem, entry.CostAmount))
         {
             denyMsg = "Payment could not be collected (inventory changed?). Try again.";
             return false;
         }
-        if (payTarget == Entity.Null || !Core.ServerGameManager.TryAddInventoryItem(payTarget, costItem, entry.CostAmount))
+        if (!Core.ServerGameManager.TryAddInventoryItem(payTarget, costItem, entry.CostAmount))
         {
-            // Refund — payment destination missing or full.
+            // Should not happen after the capacity check — refund defensively.
             Core.ServerGameManager.TryAddInventoryItem(character, costItem, entry.CostAmount);
-            denyMsg = "The payment chest is full or missing — tell the owner. No payment was taken.";
+            denyMsg = "Payment delivery failed unexpectedly — refunded. Try again.";
             return false;
         }
         ChatNotify.ToUserEntity(userEntity, $"[Uriel] Paid {entry.CostAmount}× {costItem.GetPrefabName()} for this withdrawal.");

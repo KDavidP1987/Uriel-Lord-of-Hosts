@@ -24,16 +24,88 @@ internal static class ShareCommands
         return true;
     }
 
-    [Command("share", description: "Make the castle container you're aiming at PUBLIC (anyone can use it).")]
-    public static void Share(ChatCommandContext ctx)
+    // VCF 0.10.x has no rest-of-line ([Remainder]) parameter, so stacked modifiers
+    // arrive as up to 10 optional tokens and are parsed by hand. Examples:
+    //   .uriel share
+    //   .uriel share limithours 6
+    //   .uriel share LimitHours 6 Cost 123456789 100 Permission Take   (any order)
+    [Command("share", description: "Share the aimed container. Optional stackable modifiers (any order): permission take|give|givetake, limithours <h>, limitwithdrawal <stacks>, cost <itemId> <amount>.")]
+    public static void Share(ChatCommandContext ctx,
+        string m1 = null, string m2 = null, string m3 = null, string m4 = null, string m5 = null,
+        string m6 = null, string m7 = null, string m8 = null, string m9 = null, string m10 = null)
     {
         if (!Ready(ctx)) return;
         var character = ctx.Event.SenderCharacterEntity;
         var container = Core.PublicStorage.ResolveTargetContainer(character, out string err);
         if (container == Unity.Entities.Entity.Null) { ctx.Reply(err); return; }
 
-        Core.PublicStorage.Share(character, container, out string message);
-        ctx.Reply(message);
+        // Collect supplied tokens.
+        var tokens = new System.Collections.Generic.List<string>();
+        foreach (var t in new[] { m1, m2, m3, m4, m5, m6, m7, m8, m9, m10 })
+            if (!string.IsNullOrWhiteSpace(t)) tokens.Add(t.Trim());
+
+        // ---- Parse ALL modifiers first; nothing is applied if any token is invalid. ----
+        var actions = new System.Collections.Generic.List<(string Kind, string S, double D, int A, int B)>();
+        const string usage = "Usage: .uriel share [permission take|give|givetake] [limithours <h>] [limitwithdrawal <stacks>] [cost <itemId> <amount>] — modifiers stack in any order.";
+        for (int i = 0; i < tokens.Count; i++)
+        {
+            switch (tokens[i].ToLowerInvariant())
+            {
+                case "permission":
+                    if (i + 1 >= tokens.Count) { ctx.Reply($"'permission' needs a value (take|give|givetake). {usage}"); return; }
+                    actions.Add(("permission", tokens[++i], 0, 0, 0));
+                    break;
+                case "limithours":
+                    if (i + 1 >= tokens.Count || !double.TryParse(tokens[i + 1], out double h))
+                    { ctx.Reply($"'limithours' needs a number. {usage}"); return; }
+                    i++;
+                    actions.Add(("limithours", null, h, 0, 0));
+                    break;
+                case "limitwithdrawal":
+                    if (i + 1 >= tokens.Count || !int.TryParse(tokens[i + 1], out int n))
+                    { ctx.Reply($"'limitwithdrawal' needs a whole number. {usage}"); return; }
+                    i++;
+                    actions.Add(("limitwithdrawal", null, 0, n, 0));
+                    break;
+                case "cost":
+                    if (i + 2 >= tokens.Count || !int.TryParse(tokens[i + 1], out int itemId) || !int.TryParse(tokens[i + 2], out int amount))
+                    { ctx.Reply($"'cost' needs <itemId> <amount> (find ids: .uriel finditem <name>). {usage}"); return; }
+                    i += 2;
+                    actions.Add(("cost", null, 0, itemId, amount));
+                    break;
+                default:
+                    ctx.Reply($"Unknown modifier '{tokens[i]}'. {usage}");
+                    return;
+            }
+        }
+
+        // ---- Share (if needed), then apply modifiers in the order given. ----
+        bool wasShared = Core.PublicStorage.IsShared(container);
+        if (!wasShared)
+        {
+            if (!Core.PublicStorage.Share(character, container, out string shareMsg)) { ctx.Reply(shareMsg); return; }
+            ctx.Reply(shareMsg);
+        }
+        else if (actions.Count == 0)
+        {
+            ctx.Reply("That container is already public. " + Core.PublicStorage.BuildInfoText(container));
+            return;
+        }
+
+        foreach (var a in actions)
+        {
+            string message = a.Kind switch
+            {
+                "permission" => Msg(Core.PublicStorage.SetPermission(character, container, a.S, out var m), m),
+                "limithours" => Msg(Core.PublicStorage.SetLimitHours(character, container, a.D, out var m), m),
+                "limitwithdrawal" => Msg(Core.PublicStorage.SetLimitWithdrawal(character, container, a.A, out var m), m),
+                "cost" => Msg(Core.PublicStorage.SetCost(character, container, a.A, a.B, out var m), m),
+                _ => null,
+            };
+            if (message is not null) ctx.Reply(message);
+        }
+
+        static string Msg(bool _, string m) => m;
     }
 
     [Command("unshare", description: "Make the public container you're aiming at private again.")]
@@ -123,58 +195,6 @@ internal static class ShareCommands
     }
 }
 
-/// <summary>
-/// Share-policy modifiers (v0.3.0). Each can be issued on an already-shared
-/// container to adjust it, or on an unshared one (it shares first, then applies):
-///   .uriel share permission take|give|givetake
-///   .uriel share limithours 6
-///   .uriel share limitwithdrawal 2
-///   .uriel share cost <itemId> <amount>     (itemId 0 = free; find ids: .uriel finditem)
-/// </summary>
-[CommandGroup("uriel share")]
-internal static class SharePolicyCommands
-{
-    static bool ReadyAndTarget(ChatCommandContext ctx, out Unity.Entities.Entity character, out Unity.Entities.Entity container)
-    {
-        character = default;
-        container = Unity.Entities.Entity.Null;
-        if (!Core.IsReady) { ctx.Reply("Uriel is not yet initialized."); return false; }
-        if (!Settings.PublicStorage_Enabled.Value) { ctx.Reply("Public storage is disabled by the server admin."); return false; }
-        character = ctx.Event.SenderCharacterEntity;
-        container = Core.PublicStorage.ResolveTargetContainer(character, out string err);
-        if (container == Unity.Entities.Entity.Null) { ctx.Reply(err); return false; }
-        return true;
-    }
-
-    [Command("permission", description: "Set who-can-do-what on the aimed container: take | give | givetake.")]
-    public static void Permission(ChatCommandContext ctx, string mode)
-    {
-        if (!ReadyAndTarget(ctx, out var character, out var container)) return;
-        Core.PublicStorage.SetPermission(character, container, mode, out string message);
-        ctx.Reply(message);
-    }
-
-    [Command("limithours", description: "Set the rolling window (hours) for the per-player withdrawal limit. 0 removes the limit.")]
-    public static void LimitHours(ChatCommandContext ctx, float hours)
-    {
-        if (!ReadyAndTarget(ctx, out var character, out var container)) return;
-        Core.PublicStorage.SetLimitHours(character, container, hours, out string message);
-        ctx.Reply(message);
-    }
-
-    [Command("limitwithdrawal", description: "Set how many stacks a player may take per window. 0 removes the limit.")]
-    public static void LimitWithdrawal(ChatCommandContext ctx, int stacks)
-    {
-        if (!ReadyAndTarget(ctx, out var character, out var container)) return;
-        Core.PublicStorage.SetLimitWithdrawal(character, container, stacks, out string message);
-        ctx.Reply(message);
-    }
-
-    [Command("cost", description: "Charge per stack withdrawn. Usage: .uriel share cost <itemId> <amount> (0 0 = free).")]
-    public static void Cost(ChatCommandContext ctx, int itemId, int amount)
-    {
-        if (!ReadyAndTarget(ctx, out var character, out var container)) return;
-        Core.PublicStorage.SetCost(character, container, itemId, amount, out string message);
-        ctx.Reply(message);
-    }
-}
+// NOTE: share modifiers are parsed inside the `share` command itself (stacked,
+// any order) rather than as a "uriel share" subcommand group — VCF 0.10.x can't
+// mix a group with a variadic sibling command without ambiguity.

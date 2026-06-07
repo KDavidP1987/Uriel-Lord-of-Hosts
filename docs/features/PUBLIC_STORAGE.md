@@ -24,10 +24,21 @@ Per-entry policy enforced in the move-event patch (owners/clan bypass all):
   1 stack / 24 h). Usage records persisted per steamId; a "stack" = one move
   event (partial-stack drags count as one).
 - **Cost** — `CostItemGuid` × `CostAmount` charged per stack withdrawn,
-  auto-collected from the taker's inventory, delivered to the owner's pay
-  chest (`.uriel paychest`; falls back to the shared container). Refund on
-  full/missing destination. Item ids discoverable via `.uriel finditem`
-  (runtime `Item_*` catalog from PrefabCollectionSystem).
+  auto-collected from the taker's inventory. Item ids discoverable via
+  `.uriel finditem` (runtime `Item_*` catalog from PrefabCollectionSystem).
+  **Payment delivery (v0.4.0) is capacity- and restriction-safe:** the
+  destination must fit the ENTIRE amount before payment is collected
+  (`CountFit`: empty slots × `ItemData.MaxAmount` + same-item headroom), and
+  specialized stashes (`InventoryInstanceElement.RestrictedCategory/
+  RestrictedType != 0`) are never used. Cascade: designated pay chest
+  (`.uriel paychest`, general storage only — enforced at designation) → the
+  shared container itself → nearest general non-shared storage on the same
+  castle heart → graceful deny (taker keeps payment). No partial transfers,
+  no duplication, no forced wrong-type items.
+- **Stacked modifiers (v0.4.0)** — `.uriel share` accepts all modifiers in
+  one command, any order, fully validated before any are applied. VCF 0.10.x
+  lacks `[Remainder]` (added in 0.11), so the share command takes 10 optional
+  string tokens and parses them by hand.
 - **Move-all** ("take all") is blocked for non-controllers on any restricted
   container — it can't be accounted per stack.
 
