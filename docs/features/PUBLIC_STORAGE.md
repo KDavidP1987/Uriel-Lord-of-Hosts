@@ -1,6 +1,39 @@
 # Feature: Public Storage (per-container opt-in)
 
-**Status:** IMPLEMENTED v0.2.0 (storage class only) — **pending live-server validation**
+**Status:** IMPLEMENTED v0.3.0 (storage class + policy modifiers) — open/take
+VALIDATED live (v0.2.1, 2026-06-06); deposits + policies pending validation
+
+## Live validation results (v0.2.1, 2026-06-06)
+
+Two-player test confirmed the team-swap mechanism: a non-clan player got the
+open prompt on a shared chest, could withdraw, and could put back items
+originating from the chest. **But could NOT deposit his own items** — vanilla
+refuses deposits into neutral-team containers (world-chest semantics: world
+loot chests are take-only). v0.3.0 addresses this with a
+`MoveItemBetweenInventoriesSystem` patch that executes permitted deposits
+manually and cancels the vanilla event.
+
+## Policy modifiers (v0.3.0)
+
+Per-entry policy enforced in the move-event patch (owners/clan bypass all):
+
+- **Permission** `take | give | givetake` — withdrawals denied on `give`
+  (donation box); deposits denied on `take`.
+- **Withdrawal limit** — N stacks per rolling H-hour window per player
+  (`LimitWithdrawStacks` + `LimitHours`; setting one defaults the other to
+  1 stack / 24 h). Usage records persisted per steamId; a "stack" = one move
+  event (partial-stack drags count as one).
+- **Cost** — `CostItemGuid` × `CostAmount` charged per stack withdrawn,
+  auto-collected from the taker's inventory, delivered to the owner's pay
+  chest (`.uriel paychest`; falls back to the shared container). Refund on
+  full/missing destination. Item ids discoverable via `.uriel finditem`
+  (runtime `Item_*` catalog from PrefabCollectionSystem).
+- **Move-all** ("take all") is blocked for non-controllers on any restricted
+  container — it can't be accounted per stack.
+
+Registry schema v2 (v1 files migrate implicitly via JSON defaults): entries
+gain policy fields + per-player usage; file gains a `PayChests` map
+(owner steamId → private container key).
 **Config:** `[PublicStorage] Enabled` (default `true`),
 `[PublicStorage] PrisonEnabled` (default `true`, prison not yet implemented),
 `[PublicStorage] MaxTargetDistance` (default `5`)
@@ -166,28 +199,33 @@ load. Schema version field from day one.
 - Two containers at the same position after rebuild → durable key must not
   mis-attach the public flag.
 
-## Test plan (v0.2.0 build — run on the live local server)
+## Test plan
 
-**The decisive test (validates the whole mechanism):**
-- [ ] Owner: aim at own chest, `.uriel share` → confirm reply. Second
-      account (different clan/no clan): walk up — does the open prompt
-      appear? Can they open, take, put? ← the team-swap hypothesis test.
+**Validated (v0.2.1, 2026-06-06):**
+- [x] Stranger gets open prompt on shared chest (team-swap works).
+- [x] Stranger can withdraw.
+- [x] Stranger can put back chest-originated items.
+- [x] Prison cell share refused with "coming soon".
+- [x] Stranger deposits of own items → vanilla-refused (fixed in v0.3.0,
+      revalidate below).
 
-Then:
-- [ ] Sort, split, move-all on the shared chest from the stranger account.
+**v0.3.0 validation (run on the live local server):**
+- [ ] Stranger can now DEPOSIT own items into a givetake/give chest.
+- [ ] Owner can deposit into their own shared chest (was also affected).
+- [ ] `permission take` → stranger deposit denied with message.
+- [ ] `permission give` → stranger withdrawal denied with message.
+- [ ] `limitwithdrawal 2` + `limithours 1` → 3rd stack within the hour
+      denied with remaining-time message; works again after window.
+- [ ] `cost <id> <amt>` → withdrawal auto-charges; payment lands in
+      `.uriel paychest` chest (and in the shared chest when no paychest);
+      insufficient funds → denied with message; taker sees "Paid X×..." line.
+- [ ] `.uriel finditem blood` style searches return sane id lists.
+- [ ] `.uriel info` shows the rules from a stranger account.
+- [ ] Move-all ("take all") on a restricted chest → blocked with message;
+      on an unrestricted chest → vanilla take-all still works.
 - [ ] `.uriel unshare` → stranger denied again (prompt gone/locked).
-- [ ] Owner + clanmate can still use the chest normally WHILE shared.
-- [ ] Restart server → share persists (registry re-applied; check log line
-      `[Uriel SHARE] re-applied public team ...`).
-- [ ] Stranger cannot `.uriel share`/`unshare` someone else's container.
-- [ ] `.uriel shared`, `.uriel sharedall`, `.uriel unshareall` outputs sane.
-- [ ] Aim at prison cell + `.uriel share` → refused with "coming soon".
-- [ ] `PublicStorage.Enabled = false` → commands refuse; restart with it
-      false → shares NOT re-applied (containers private).
-- [ ] Castle decay/refault behavior: shared chest in decayed castle.
-- [ ] Raid scenario: shared chest during breach — no unintended changes.
+- [ ] Restart server → share + policies + usage windows persist.
+- [ ] `PublicStorage.Enabled = false` → commands refuse; patches inert.
 
-**If the stranger gets NO open prompt (client gates on something else):**
-fallback experiments, in order: (1) also neutralize `UserOwner.Owner`
-(store + restore); (2) check `NameableInteractable.OnlyAllySee/OnlyAllyRename`;
-(3) the per-system validation-patch table above (Approach A).
+**Still to verify sometime:** sort/split paths from stranger account, castle
+decay behavior, raid-breach interaction.

@@ -13,7 +13,7 @@ fixes, each individually toggleable by server admins.
 
 | Feature | Status | Design doc |
 |---|---|---|
-| **Public storage** — per-container opt-in: mark a specific chest publicly accessible (`.uriel share` / `.uriel unshare`) | Implemented (experimental, pending live-server validation) | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
+| **Public storage** — per-container opt-in: mark a specific chest publicly accessible, with optional permissions (take/give), per-player withdrawal limits, and per-stack access costs paid to the owner | Implemented (experimental; open+take validated live, policies pending validation) | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
 | **Public prison cells** — separately mark a prison cell publicly accessible | Design | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
 | **Stair hot-swap** — swap placed stairs to another stair type without demolishing | Researched | [docs/features/STAIR_HOTSWAP.md](docs/features/STAIR_HOTSWAP.md) |
 

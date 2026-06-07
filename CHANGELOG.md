@@ -8,6 +8,36 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.3.0] - 2026-06-06
+
+### Added — sharing policy modifiers (experimental)
+- **Permissions** (`.uriel share permission take|give|givetake`): take-only,
+  donation-box (give-only), or both (default). Enforced per move event.
+- **Withdrawal limits** (`.uriel share limithours <h>` /
+  `.uriel share limitwithdrawal <stacks>`): per-player rolling window —
+  N stacks per H hours. Setting one side defaults the other (1 stack / 24h);
+  0 clears. Usage tracked per steamId in the registry, persists restarts.
+- **Access cost** (`.uriel share cost <itemId> <amount>`): each stack
+  withdrawn auto-charges the taker; payment is delivered to the owner's
+  designated pay chest (`.uriel paychest`, aimed at a private container) or
+  into the shared container itself if none is designated. Refunds on full/
+  missing payment destination. Item id 0 clears the cost.
+- **Item catalog** (`.uriel finditem <name>`): searches all `Item_*` prefabs
+  (built at init from the prefab collection), replies name → numeric id for
+  use with `cost`.
+- **`.uriel info`**: anyone can aim at a container to see its sharing rules
+  (permission, limits, cost, sharer).
+- Modifiers issued on an unshared container share it first, then apply.
+- Owners/clan (castle-heart team) bypass all policies on their containers.
+
+### Fixed
+- **Strangers can now deposit into shared containers** (with permission
+  give/givetake). Live testing showed vanilla refuses deposits into
+  neutral-team containers (world-chest semantics) — a new
+  `MoveItemBetweenInventoriesSystem` patch executes permitted deposits
+  manually and cancels the vanilla event. "Move all" actions are blocked for
+  non-controllers on policy-restricted containers (no per-stack accounting).
+
 ## [0.2.1] - 2026-06-06
 
 ### Fixed

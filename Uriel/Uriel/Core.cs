@@ -22,6 +22,7 @@ internal static class Core
     public static ServerGameManager ServerGameManager => ServerScriptMapper.GetServerGameManager();
 
     public static PublicStorageService PublicStorage { get; private set; }
+    public static ItemCatalogService ItemCatalog { get; private set; }
 
     public static ManualLogSource Log => Plugin.PluginLog;
     public static bool IsReady { get; private set; }
@@ -58,6 +59,8 @@ internal static class Core
             ServerScriptMapper = server.GetExistingSystemManaged<ServerScriptMapper>();
 
             // Feature services initialize here (after game data is loaded), in dependency order.
+            ItemCatalog = new ItemCatalogService();
+            ItemCatalog.Build();
             PublicStorage = new PublicStorageService();
             PublicStorage.Load();
             // Placement teams are restored from the game save; our share state lives only

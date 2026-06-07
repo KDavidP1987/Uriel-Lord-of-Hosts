@@ -15,7 +15,8 @@ internal static class RootCommands
     {
         ctx.Reply("Uriel, Lord of Hosts — a host of server enhancements.");
         ctx.Reply($"Version {MyPluginInfo.PLUGIN_VERSION}. Features arrive incrementally; each is admin-toggleable in config.");
-        ctx.Reply("Public storage: aim at your chest → .uriel share / .uriel unshare / .uriel shared");
+        ctx.Reply("Public storage: aim at your chest → .uriel share / unshare / shared / info");
+        ctx.Reply("Sharing rules: .uriel share permission|limithours|limitwithdrawal|cost — payments: .uriel paychest. Item ids: .uriel finditem <name>");
         ctx.Reply("Use .help uriel for the full command list.");
     }
 }

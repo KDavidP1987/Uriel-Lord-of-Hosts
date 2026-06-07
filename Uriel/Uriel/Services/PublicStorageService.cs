@@ -41,15 +41,47 @@ internal sealed class PublicStorageService
         public string ContainerClass { get; set; } = "storage"; // "storage" | "prison" (prison not yet implemented)
         public ulong SharedBySteamId { get; set; }
         public string SharedAtUtc { get; set; }
+
+        // ---- policy modifiers (schema v2) ----
+        /// <summary>"take" (withdraw only) | "give" (donation box) | "givetake" (both, default).</summary>
+        public string Permission { get; set; } = "givetake";
+        /// <summary>Stacks a non-controller may withdraw per window; 0 = unlimited.</summary>
+        public int LimitWithdrawStacks { get; set; }
+        /// <summary>Rolling window length in hours for the withdrawal limit; 0 = no window.</summary>
+        public double LimitHours { get; set; }
+        /// <summary>Item required per stack withdrawn; 0 = free.</summary>
+        public int CostItemGuid { get; set; }
+        public int CostAmount { get; set; }
+        /// <summary>Per-player usage tracking (key = steamId as string for JSON).</summary>
+        public Dictionary<string, UsageRecord> Usage { get; set; } = new();
+
+        public bool HasRestrictions =>
+            Permission != "givetake" || LimitWithdrawStacks > 0 || LimitHours > 0 || CostItemGuid != 0;
+    }
+
+    internal sealed class UsageRecord
+    {
+        public string WindowStartUtc { get; set; }
+        public int StacksTaken { get; set; }
+    }
+
+    /// <summary>Owner-designated private container that receives cost payments.</summary>
+    internal sealed class PayChestRef
+    {
+        public int PrefabGuid { get; set; }
+        public int TileX { get; set; }
+        public int TileY { get; set; }
     }
 
     sealed class SaveFile
     {
-        public int SchemaVersion { get; set; } = 1;
+        public int SchemaVersion { get; set; } = 2;
         public List<PublicContainerEntry> Entries { get; set; } = new();
+        public Dictionary<string, PayChestRef> PayChests { get; set; } = new(); // key = owner steamId
     }
 
     readonly List<PublicContainerEntry> _entries = new();
+    readonly Dictionary<string, PayChestRef> _payChests = new();
 
     // Known world-chest prefab GUIDs (from the prefab dump) — neutral-team donors.
     static readonly int[] WorldChestGuids =
@@ -86,7 +118,12 @@ internal sealed class PublicStorageService
             if (file?.Entries is null) return;
             _entries.Clear();
             _entries.AddRange(file.Entries);
-            Core.Log.LogInfo($"[Uriel SHARE] loaded {_entries.Count} public-container entry(ies).");
+            _payChests.Clear();
+            if (file.PayChests is not null)
+                foreach (var kvp in file.PayChests) _payChests[kvp.Key] = kvp.Value;
+            // v1 → v2 migration is implicit: missing policy fields deserialize to defaults
+            // (givetake, no limits, no cost) and the next save writes schema v2.
+            Core.Log.LogInfo($"[Uriel SHARE] loaded {_entries.Count} public-container entry(ies), {_payChests.Count} pay chest(s).");
         }
         catch (Exception ex)
         {
@@ -100,7 +137,8 @@ internal sealed class PublicStorageService
         try
         {
             Directory.CreateDirectory(SaveDir);
-            var json = JsonSerializer.Serialize(new SaveFile { Entries = _entries },
+            var json = JsonSerializer.Serialize(
+                new SaveFile { Entries = _entries, PayChests = new Dictionary<string, PayChestRef>(_payChests) },
                 new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(SavePath, json);
         }
@@ -452,5 +490,399 @@ internal sealed class PublicStorageService
             applied++;
         }
         Core.Log.LogInfo($"[Uriel SHARE] re-applied public team to {applied} container(s); {missing} entry(ies) did not resolve (kept; '.uriel unshareall' to purge).");
+    }
+
+    // ================================================================ policy modifiers (v0.3.0)
+
+    /// <summary>Find (or create by sharing) the entry for a container the caller controls.</summary>
+    bool TryGetOrShare(Entity character, Entity container, out PublicContainerEntry entry, out string error)
+    {
+        entry = FindEntry(container);
+        error = null;
+        if (entry is not null)
+        {
+            // Policy edits require control (or being the original sharer).
+            if (!CharacterControlsContainer(character, container) && character.GetSteamId() != entry.SharedBySteamId)
+            {
+                entry = null;
+                error = "You don't control this container, so you can't change its sharing policy.";
+                return false;
+            }
+            return true;
+        }
+        if (!Share(character, container, out string shareMsg)) { error = shareMsg; return false; }
+        entry = FindEntry(container);
+        if (entry is null) { error = "Share succeeded but the entry could not be found (report this)."; return false; }
+        return true;
+    }
+
+    public bool SetPermission(Entity character, Entity container, string permission, out string message)
+    {
+        permission = permission?.Trim().ToLowerInvariant();
+        if (permission is not ("take" or "give" or "givetake"))
+        {
+            message = "Permission must be one of: take (withdraw only), give (donation box), givetake (both).";
+            return false;
+        }
+        if (!TryGetOrShare(character, container, out var entry, out message)) return false;
+        entry.Permission = permission;
+        SaveSync();
+        message = $"Container is public with permission '{permission}' " + permission switch
+        {
+            "take" => "(others can only take items out).",
+            "give" => "(others can only put items in — donation box).",
+            _ => "(others can take AND put items).",
+        };
+        return true;
+    }
+
+    public bool SetLimitHours(Entity character, Entity container, double hours, out string message)
+    {
+        if (hours < 0) { message = "Hours must be 0 (no window) or positive."; return false; }
+        if (!TryGetOrShare(character, container, out var entry, out message)) return false;
+        entry.LimitHours = hours;
+        if (hours > 0 && entry.LimitWithdrawStacks <= 0) entry.LimitWithdrawStacks = 1; // sensible default: 1 stack per window
+        if (hours == 0) { entry.LimitWithdrawStacks = 0; entry.Usage.Clear(); }
+        SaveSync();
+        message = hours == 0
+            ? "Withdrawal limit removed — container has no per-period cap."
+            : $"Withdrawal limit: {entry.LimitWithdrawStacks} stack(s) per {hours:0.#}h per player.";
+        return true;
+    }
+
+    public bool SetLimitWithdrawal(Entity character, Entity container, int stacks, out string message)
+    {
+        if (stacks < 0) { message = "Stacks must be 0 (unlimited) or positive."; return false; }
+        if (!TryGetOrShare(character, container, out var entry, out message)) return false;
+        entry.LimitWithdrawStacks = stacks;
+        if (stacks > 0 && entry.LimitHours <= 0) entry.LimitHours = 24; // sensible default window
+        if (stacks == 0) { entry.LimitHours = 0; entry.Usage.Clear(); }
+        SaveSync();
+        message = stacks == 0
+            ? "Withdrawal limit removed — container has no per-period cap."
+            : $"Withdrawal limit: {stacks} stack(s) per {entry.LimitHours:0.#}h per player.";
+        return true;
+    }
+
+    public bool SetCost(Entity character, Entity container, int itemGuid, int amount, out string message)
+    {
+        if (itemGuid != 0 && (amount <= 0))
+        {
+            message = "Cost amount must be positive (or use item id 0 to make it free).";
+            return false;
+        }
+        if (itemGuid != 0 && Core.ItemCatalog is not null && !Core.ItemCatalog.IsKnownItem(itemGuid))
+        {
+            message = $"Unknown item id {itemGuid}. Find the right id with: .uriel finditem <name>";
+            return false;
+        }
+        if (!TryGetOrShare(character, container, out var entry, out message)) return false;
+        entry.CostItemGuid = itemGuid;
+        entry.CostAmount = itemGuid == 0 ? 0 : amount;
+        SaveSync();
+        message = itemGuid == 0
+            ? "Container is now free to access."
+            : $"Access cost: {amount}× {new PrefabGUID(itemGuid).GetPrefabName()} per stack withdrawn. " +
+              (GetPayChest(entry.SharedBySteamId) is null
+                  ? "Payments go INTO this container (designate a private payment chest with '.uriel paychest')."
+                  : "Payments go to your designated pay chest.");
+        return true;
+    }
+
+    // ---------------------------------------------------------------- pay chest
+
+    public PayChestRef GetPayChest(ulong steamId) =>
+        _payChests.TryGetValue(steamId.ToString(), out var r) ? r : null;
+
+    public bool SetPayChest(Entity character, Entity container, out string message)
+    {
+        if (!CharacterControlsContainer(character, container))
+        {
+            message = "You don't control this container — aim at one of YOUR private chests.";
+            return false;
+        }
+        if (FindEntry(container) is not null)
+        {
+            message = "That container is public — payments must go to a PRIVATE chest. Aim at a private one.";
+            return false;
+        }
+        if (!container.TryGetComponent<TilePosition>(out var tile))
+        {
+            message = "Container has no tile position; cannot register it.";
+            return false;
+        }
+        _payChests[character.GetSteamId().ToString()] = new PayChestRef
+        {
+            PrefabGuid = container.GetPrefabGuid()._Value,
+            TileX = tile.Tile.x,
+            TileY = tile.Tile.y,
+        };
+        SaveSync();
+        message = $"Payment chest set: {container.GetPrefabGuid().GetPrefabName()}. Cost payments from your shared containers will be delivered here.";
+        return true;
+    }
+
+    Entity ResolvePayChest(ulong ownerSteamId)
+    {
+        var r = GetPayChest(ownerSteamId);
+        if (r is null) return Entity.Null;
+        return ResolveEntry(new PublicContainerEntry { PrefabGuid = r.PrefabGuid, TileX = r.TileX, TileY = r.TileY });
+    }
+
+    // ---------------------------------------------------------------- info
+
+    public string BuildInfoText(Entity container)
+    {
+        var entry = FindEntry(container);
+        string name = container.GetPrefabGuid().GetPrefabName();
+        if (entry is null) return $"{name}: private (not shared). Controllers can share it with '.uriel share'.";
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"{name}: PUBLIC [{entry.Permission}]");
+        if (entry.LimitWithdrawStacks > 0)
+            sb.Append($", limit {entry.LimitWithdrawStacks} stack(s)/{entry.LimitHours:0.#}h per player");
+        if (entry.CostItemGuid != 0)
+            sb.Append($", cost {entry.CostAmount}× {new PrefabGUID(entry.CostItemGuid).GetPrefabName()} per stack");
+        sb.Append($". Shared by {entry.SharedBySteamId} since {entry.SharedAtUtc}.");
+        return sb.ToString();
+    }
+
+    // ================================================================ move-event enforcement (v0.3.0)
+
+    /// <summary>
+    /// Map an inventory entity from a move event back to its container: the entity
+    /// itself if registered, else via InventoryConnection.InventoryOwner.
+    /// </summary>
+    Entity ContainerOf(Entity inventoryEntity)
+    {
+        if (inventoryEntity == Entity.Null) return Entity.Null;
+        if (FindEntry(inventoryEntity) is not null) return inventoryEntity;
+        if (inventoryEntity.TryGetComponent<InventoryConnection>(out var conn)
+            && conn.InventoryOwner.Exists())
+            return conn.InventoryOwner;
+        return inventoryEntity;
+    }
+
+    static Entity ResolveNetworkId(ProjectM.Network.NetworkId id)
+    {
+        // This assembly version exposes the NetworkId→Entity map as an ECS singleton
+        // (NetworkIdSystem.Singleton._NetworkIdLookupMap), fetched via ServerScriptMapper.
+        try
+        {
+            var singleton = Core.ServerScriptMapper.GetSingleton<ProjectM.Network.NetworkIdSystem.Singleton>();
+            return singleton._NetworkIdLookupMap.TryGetValue(id, out Entity e) ? e : Entity.Null;
+        }
+        catch
+        {
+            return Entity.Null;
+        }
+    }
+
+    void Deny(Entity eventEntity, Entity userEntity, string reason)
+    {
+        ChatNotify.ToUserEntity(userEntity, $"[Uriel] {reason}");
+        Core.EntityManager.DestroyEntity(eventEntity);
+    }
+
+    /// <summary>
+    /// Called from the MoveItemBetweenInventories prefix for every pending move
+    /// event. Applies the sharing policy when either side is a public container;
+    /// executes permitted deposits manually (vanilla refuses deposits into
+    /// neutral-team containers — confirmed by live testing, v0.2.x).
+    /// </summary>
+    public void HandleMoveEvent(Entity eventEntity, ProjectM.Network.FromCharacter fromChar,
+        ProjectM.Network.NetworkId fromInvId, ProjectM.Network.NetworkId toInvId, int fromSlot)
+    {
+        Entity fromInv = ResolveNetworkId(fromInvId);
+        Entity toInv = ResolveNetworkId(toInvId);
+        Entity fromContainer = ContainerOf(fromInv);
+        Entity toContainer = ContainerOf(toInv);
+        var fromEntry = fromContainer.Exists() ? FindEntry(fromContainer) : null;
+        var toEntry = toContainer.Exists() ? FindEntry(toContainer) : null;
+        if (fromEntry is null && toEntry is null) return;          // no public container involved
+        if (fromContainer == toContainer) return;                  // intra-container shuffle
+
+        Entity character = fromChar.Character;
+        Entity userEntity = fromChar.User;
+        bool verbose = Settings.VerboseLogging.Value;
+
+        // ---- WITHDRAW from a public container ----
+        if (fromEntry is not null)
+        {
+            if (CharacterControlsContainer(character, fromContainer)) return; // controllers bypass
+            if (fromEntry.Permission == "give")
+            {
+                Deny(eventEntity, userEntity, "This container is a DONATION BOX — you can put items in, not take them.");
+                return;
+            }
+            if (!CheckWithdrawalWindow(fromEntry, character.GetSteamId(), out string limitMsg))
+            {
+                Deny(eventEntity, userEntity, limitMsg);
+                return;
+            }
+            if (!TryCollectCost(fromEntry, character, userEntity, out string costMsg))
+            {
+                Deny(eventEntity, userEntity, costMsg);
+                return;
+            }
+            ConsumeWithdrawal(fromEntry, character.GetSteamId());
+            if (verbose) Core.Log.LogInfo($"[Uriel SHARE] {character.GetSteamId()} withdrew a stack from public {fromContainer.GetPrefabGuid().GetPrefabName()}.");
+            return; // allow: vanilla executes the withdrawal (loot semantics already permit it)
+        }
+
+        // ---- DEPOSIT into a public container ----
+        if (toEntry is not null)
+        {
+            bool controller = CharacterControlsContainer(character, toContainer);
+            if (!controller && toEntry.Permission == "take")
+            {
+                Deny(eventEntity, userEntity, "This container is TAKE-ONLY — you can't put items into it.");
+                return;
+            }
+            // Vanilla refuses deposits into neutral-team containers (world-chest
+            // semantics) for EVERYONE, controllers included — execute it manually.
+            ManualDeposit(eventEntity, character, userEntity, fromInv, fromSlot, toContainer, verbose);
+        }
+    }
+
+    bool CheckWithdrawalWindow(PublicContainerEntry entry, ulong steamId, out string denyMsg)
+    {
+        denyMsg = null;
+        if (entry.LimitWithdrawStacks <= 0) return true;
+        double hours = entry.LimitHours > 0 ? entry.LimitHours : 24;
+        string key = steamId.ToString();
+        if (entry.Usage.TryGetValue(key, out var rec)
+            && DateTime.TryParse(rec.WindowStartUtc, null,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal,
+                out DateTime windowStart))
+        {
+            var elapsed = DateTime.UtcNow - windowStart;
+            if (elapsed.TotalHours >= hours)
+                return true; // window expired — ConsumeWithdrawal resets it
+            if (rec.StacksTaken >= entry.LimitWithdrawStacks)
+            {
+                var remaining = TimeSpan.FromHours(hours) - elapsed;
+                denyMsg = $"Withdrawal limit reached ({entry.LimitWithdrawStacks} stack(s) per {hours:0.#}h). Try again in {FormatSpan(remaining)}.";
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void ConsumeWithdrawal(PublicContainerEntry entry, ulong steamId)
+    {
+        if (entry.LimitWithdrawStacks <= 0) return;
+        double hours = entry.LimitHours > 0 ? entry.LimitHours : 24;
+        string key = steamId.ToString();
+        bool inWindow = entry.Usage.TryGetValue(key, out var rec)
+            && DateTime.TryParse(rec.WindowStartUtc, null,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal,
+                out DateTime windowStart)
+            && (DateTime.UtcNow - windowStart).TotalHours < hours;
+        if (!inWindow)
+        {
+            rec = new UsageRecord { WindowStartUtc = DateTime.UtcNow.ToString("u"), StacksTaken = 0 };
+            entry.Usage[key] = rec;
+        }
+        rec.StacksTaken++;
+        SaveSync();
+    }
+
+    static string FormatSpan(TimeSpan span) =>
+        span.TotalHours >= 1 ? $"{(int)span.TotalHours}h {span.Minutes}m" : $"{span.Minutes}m";
+
+    /// <summary>
+    /// Charge the per-stack access cost: remove from the taker's inventory, deliver
+    /// to the owner's pay chest (fallback: the shared container itself).
+    /// </summary>
+    bool TryCollectCost(PublicContainerEntry entry, Entity character, Entity userEntity, out string denyMsg)
+    {
+        denyMsg = null;
+        if (entry.CostItemGuid == 0) return true;
+        var costItem = new PrefabGUID(entry.CostItemGuid);
+
+        if (!InventoryUtilities.TryGetInventoryEntity(Core.EntityManager, character, out Entity playerInv)
+            || Core.ServerGameManager.GetInventoryItemCount(playerInv, costItem) < entry.CostAmount)
+        {
+            denyMsg = $"This container costs {entry.CostAmount}× {costItem.GetPrefabName()} per stack — you don't have enough.";
+            return false;
+        }
+
+        Entity payTarget = ResolvePayChest(entry.SharedBySteamId);
+        if (payTarget == Entity.Null)
+            payTarget = ResolveEntry(entry); // fallback: payment goes into the shared container
+
+        if (!Core.ServerGameManager.TryRemoveInventoryItem(playerInv, costItem, entry.CostAmount))
+        {
+            denyMsg = "Payment could not be collected (inventory changed?). Try again.";
+            return false;
+        }
+        if (payTarget == Entity.Null || !Core.ServerGameManager.TryAddInventoryItem(payTarget, costItem, entry.CostAmount))
+        {
+            // Refund — payment destination missing or full.
+            Core.ServerGameManager.TryAddInventoryItem(character, costItem, entry.CostAmount);
+            denyMsg = "The payment chest is full or missing — tell the owner. No payment was taken.";
+            return false;
+        }
+        ChatNotify.ToUserEntity(userEntity, $"[Uriel] Paid {entry.CostAmount}× {costItem.GetPrefabName()} for this withdrawal.");
+        return true;
+    }
+
+    /// <summary>
+    /// Execute a deposit ourselves, then destroy the vanilla event (which would
+    /// have been refused for a neutral-team container). Refunds on failure.
+    /// </summary>
+    void ManualDeposit(Entity eventEntity, Entity character, Entity userEntity,
+        Entity fromInv, int fromSlot, Entity toContainer, bool verbose)
+    {
+        try
+        {
+            if (!Core.ServerGameManager.TryGetBuffer<InventoryBuffer>(fromInv, out var buffer)
+                || fromSlot < 0 || fromSlot >= buffer.Length)
+            {
+                return; // not a readable source inventory — leave the event to vanilla
+            }
+            var slot = buffer[fromSlot];
+            PrefabGUID itemGuid = slot.ItemType;
+            int amount = slot.Amount;
+            if (itemGuid._Value == 0 || amount <= 0) return;
+
+            if (!Core.ServerGameManager.TryRemoveInventoryItem(fromInv, itemGuid, amount))
+            {
+                Deny(eventEntity, userEntity, "Deposit failed (item could not be moved).");
+                return;
+            }
+            if (!Core.ServerGameManager.TryAddInventoryItem(toContainer, itemGuid, amount))
+            {
+                Core.ServerGameManager.TryAddInventoryItem(character, itemGuid, amount); // refund
+                Deny(eventEntity, userEntity, "That container is full.");
+                return;
+            }
+            Core.EntityManager.DestroyEntity(eventEntity); // we did the move; don't let vanilla double-process
+            if (verbose) Core.Log.LogInfo($"[Uriel SHARE] {character.GetSteamId()} deposited {amount}× {itemGuid.GetPrefabName()} into public {toContainer.GetPrefabGuid().GetPrefabName()}.");
+        }
+        catch (Exception ex)
+        {
+            Core.Log.LogWarning($"[Uriel SHARE] manual deposit failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Move-all ("take all" style) events can't be policy-accounted per stack —
+    /// block them for non-controllers whenever the container has any restriction.
+    /// Unrestricted containers let vanilla proceed (take-all works; deposit-all is
+    /// refused by vanilla either way).
+    /// </summary>
+    public void HandleMoveAllEvent(Entity eventEntity, ProjectM.Network.FromCharacter fromChar,
+        ProjectM.Network.NetworkId fromInvId, ProjectM.Network.NetworkId toInvId)
+    {
+        Entity fromContainer = ContainerOf(ResolveNetworkId(fromInvId));
+        Entity toContainer = ContainerOf(ResolveNetworkId(toInvId));
+        var entry = fromContainer.Exists() ? FindEntry(fromContainer) : null;
+        entry ??= toContainer.Exists() ? FindEntry(toContainer) : null;
+        if (entry is null) return;
+        Entity publicContainer = FindEntry(fromContainer) is not null ? fromContainer : toContainer;
+        if (CharacterControlsContainer(fromChar.Character, publicContainer)) return;
+        if (!entry.HasRestrictions) return;
+        Deny(eventEntity, fromChar.User, "This container has sharing rules — move items one at a time.");
     }
 }
