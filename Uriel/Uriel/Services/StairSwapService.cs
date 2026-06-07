@@ -303,11 +303,23 @@ internal sealed class StairSwapService
         if (oldRoot.Has<BlueprintData>())
             oldRoot.With((ref BlueprintData b) => b.Guid = targetGuid);
 
+        // v0.13.1 (live finding: even a RELOG kept the old look): placed castle
+        // tiles replicate as MEGA-STATIC network objects — the client derives
+        // the visual from MegaStatic_PrefabGUID embedded in the NetworkId
+        // itself, NOT from the PrefabGUID component. Rewrite it too.
+        bool wasMegaStatic = false;
+        if (oldRoot.TryGetComponent<ProjectM.Network.NetworkId>(out var netId)
+            && netId.Type == ProjectM.Network.NetworkIdType.MegaStatic)
+        {
+            wasMegaStatic = true;
+            oldRoot.With((ref ProjectM.Network.NetworkId n) => n.MegaStatic_PrefabGUID = targetGuid._Value);
+        }
+
         // Push the new identity to connected clients (entity re-receive).
         PublicStorageService.ForceResync(oldRoot);
 
-        Core.Log.LogInfo($"[Uriel STAIRS] identity swap: {archetype} {fromStyle} -> {toStyle} (entity preserved).");
-        message = $"Stair swapped: {fromStyle} -> {toStyle} ({archetype}). If it still LOOKS like the old style, step away and back (or relog) - the change is already applied.";
+        Core.Log.LogInfo($"[Uriel STAIRS] identity swap: {archetype} {fromStyle} -> {toStyle} (entity preserved; megaStatic={wasMegaStatic}).");
+        message = $"Stair swapped: {fromStyle} -> {toStyle} ({archetype}). If it still LOOKS like the old style, relog — and everything fully settles at the next server restart.";
         return true;
     }
     /// <summary>

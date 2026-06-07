@@ -8,6 +8,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.13.1] - 2026-06-07
+
+### Fixed — the visual identity lives in the NETWORK id
+- v0.13.0 identity swaps didn't change the stair's appearance even after a
+  relog (live test). Root cause found by reflection: placed castle tiles
+  replicate as **MegaStatic** network objects — the client derives the visual
+  from `NetworkId.MegaStatic_PrefabGUID`, a prefab reference embedded in the
+  network identity itself, not from the `PrefabGUID` component. The swap now
+  rewrites that field as well (when the tile is MegaStatic-networked).
+- Visual refresh guidance: relog if the look doesn't update live; everything
+  fully settles at the next server restart (network ids regenerate from the
+  swapped prefab identity at load).
+
 ## [0.13.0] - 2026-06-07
 
 ### Changed — stair swap is now an IDENTITY swap (the mod owner's insight)

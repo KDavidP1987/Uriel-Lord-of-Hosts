@@ -3,6 +3,12 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.13.1 (2026-06-07)
+
+- Fix: swapped stairs now actually change their appearance (the game hides
+  the visual identity in a second place — found it). Relog if a swap doesn't
+  show immediately; a server restart settles everything.
+
 ## 0.13.0 (2026-06-07)
 
 - Stair swap reworked: the placed stair now simply BECOMES the other style —
