@@ -218,6 +218,12 @@ by `guid`; `cat` = a coarse category for grouping + fallback icons, one of
 - Player-facing chat equivalents (non-API): `.uriel catalog [page]`, `.uriel unlocks`,
   `.uriel notify <on|off>` (per-player message suppression). Admin: `.uriel block`/`unblock`/
   `blocklist`, `.uriel grant`/`revoke`/`grantall`, `.uriel bossmap`.
+- Object MANAGEMENT (placed objects, plain-text replies — not `[URIEL:*]`): `.uriel despawn`/
+  `move`/`rotate`/`spawninfo`/`spawnlist` (player, own plot), `.uriel purgeplot` (admin). These
+  re-resolve the target from Uriel's spawned-object registry on demand, so they work across
+  relog/restart. Admin record-IGNORING recovery for untracked objects: `.uriel forcedespawn
+  [confirm]` (arm → names the prefab → confirm within 30s) and `.uriel forcepurgeplot`. All
+  reply in plain text; none emit `[URIEL:*]` wire lines (no BCH parsing required).
 
 ### 🎨 Object palette UI: rendering icons/previews (server can't ship images)
 

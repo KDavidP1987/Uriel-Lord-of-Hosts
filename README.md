@@ -73,6 +73,8 @@ In **Discovery** mode you unlock objects by **destroying them in the world** (co
 | `.uriel grantall <player> [all\|destructible\|indestructible]` | Bulk-grant the catalog (or a subset) |
 | `.uriel block\|unblock <guid>` · `.uriel blocklist` | Forbid / allow a prefab (excluded from catalog + collection %) |
 | `.uriel spawnlist` · `.uriel purgeplot` | List / clear all spawned objects on the plot you're in |
+| `.uriel forcedespawn [confirm]` | Force-remove the aimed object, ignoring records/ownership (recovers untracked objects); names it, then `confirm` within 30s |
+| `.uriel forcepurgeplot` | Force-remove every Uriel-like object on the plot, including untracked ones (native build pieces are left) |
 | `.uriel bossmap add\|remove\|list <vblood> <obj>` | Curate which objects a V-blood defeat unlocks |
 | `.uriel api version\|catalog\|unlocked` | `[URIEL:*]` machine API for BloodCraftHub |
 </details>

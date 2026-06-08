@@ -3,6 +3,23 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.16.0 (2026-06-08)
+
+- **Fix: spawned objects can be managed again after a relog or server restart.**
+  `.uriel despawn` / `move` / `rotate` / `spawninfo` previously couldn't find
+  objects you'd spawned in an earlier session — they now re-find them reliably,
+  and the spawned-object list is no longer wiped on restart.
+- **Fix: removing certain older spawned objects no longer makes them reappear.**
+  Some objects spawned in an early build kept re-spawning the instant you removed
+  them; they're now removed for good.
+- **New (admin): `.uriel forcedespawn`** — force-remove the object you're aiming
+  at, even one Uriel doesn't track (e.g. left over from an older version). Run it
+  once to target (it names the object), then `.uriel forcedespawn confirm` within
+  30s. It never targets your castle heart.
+- **New (admin): `.uriel forcepurgeplot`** — clear every leftover spawned object
+  on the plot you're standing in, including untracked ones. Your normal build
+  pieces are left untouched.
+
 ## 0.15.0 (2026-06-08)
 
 - **New feature: Object Spawning — collect & place WORLD objects in your castle!**

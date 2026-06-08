@@ -46,9 +46,6 @@ internal sealed class ObjectSpawnService
     const int TileGridOffset = 6400;
     const float BlockSize = 10f;
 
-    // Live cache of spawned entities (rebuilt from the registry on boot) — fast targeting.
-    readonly List<Entity> _spawned = new();
-
     // ============================================================ persistence registry
 
     internal sealed class SpawnRecord
@@ -56,6 +53,13 @@ internal sealed class ObjectSpawnService
         public int PrefabGuid { get; set; }
         public int TileX { get; set; }
         public int TileY { get; set; }
+        // World position at spawn (schema v2). A save/load round-trip can re-quantize an object's
+        // TilePosition.Tile slightly; this lets LiveIndex.Resolve fall back to nearest-by-position
+        // (same prefab, within ~2m) so an object stays recognizable as Uriel-spawned even if its
+        // tile drifts. Backfilled for old records on the first boot that resolves them.
+        public float PosX { get; set; }
+        public float PosY { get; set; }
+        public float PosZ { get; set; }
         public bool Indestructible { get; set; }
         public int TerritoryIndex { get; set; } = -1;
         public bool HasHeart { get; set; }
@@ -70,7 +74,7 @@ internal sealed class ObjectSpawnService
 
     sealed class SaveFile
     {
-        public int SchemaVersion { get; set; } = 1;
+        public int SchemaVersion { get; set; } = 2;
         public List<SpawnRecord> Objects { get; set; } = new();
     }
 
@@ -211,6 +215,12 @@ internal sealed class ObjectSpawnService
             PaidCostItem = paidItem,
             PaidCostAmount = paidAmount,
         };
+        if (e.TryGetComponent<Translation>(out var tr))
+        {
+            rec.PosX = tr.Value.x;
+            rec.PosY = tr.Value.y;
+            rec.PosZ = tr.Value.z;
+        }
         if (heart.Exists() && heart.TryGetComponent<TilePosition>(out var ht))
         {
             rec.HasHeart = true;
@@ -221,50 +231,51 @@ internal sealed class ObjectSpawnService
         SaveSync();
     }
 
-    SpawnRecord FindRecordFor(Entity e)
-    {
-        if (!e.TryGetComponent<TilePosition>(out var tp)) return null;
-        int guid = e.GetPrefabGuid()._Value;
-        foreach (var r in _records)
-            if (r.PrefabGuid == guid && r.TileX == tp.Tile.x && r.TileY == tp.Tile.y) return r;
-        return null;
-    }
+    // ---- live-entity resolution (on demand, registry-driven — no stale entity cache) ----
+    //
+    // The engine recreates a castle object's entity (new Entity handle) whenever the castle streams
+    // out and back in: a player relogging, leaving and returning to the territory, or a server
+    // restart all do it. A cached Entity handle therefore goes stale and stops resolving, which is
+    // why management used to "lose" objects across a relog/restart. Instead we keep ONLY the JSON
+    // registry as the source of truth and re-resolve each record to its CURRENT live entity on
+    // demand — by (prefab GUID + tile), with a world-position fallback for tile drift.
 
-    /// <summary>Re-resolve the live entity for a record (prefab GUID + tile coords) — must
-    /// include disabled entities (castle objects sit Disabled when no player is near).</summary>
-    Entity ResolveRecord(SpawnRecord r)
+    /// <summary>One-shot index of every placed tile object, used to re-resolve registry records to
+    /// their live entities. Built fresh per command (spawns/edits are infrequent). Disabled-included
+    /// (castle objects sit Disabled when no player is near); Prefab entities are excluded by the
+    /// query (no IncludePrefab), so a record never resolves to a template.</summary>
+    sealed class LiveIndex
     {
-        var builder = new EntityQueryBuilder(Allocator.Temp)
-            .AddAll(new(Il2CppType.Of<PrefabGUID>(), ComponentType.AccessMode.ReadOnly))
-            .AddAll(new(Il2CppType.Of<TilePosition>(), ComponentType.AccessMode.ReadOnly))
-            .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
-        var query = Core.EntityManager.CreateEntityQuery(ref builder);
-        var entities = query.ToEntityArray(Allocator.Temp);
-        try
+        public readonly Dictionary<(int, int, int), Entity> ByTile = new();
+        public readonly Dictionary<int, List<Entity>> ByGuid = new();
+
+        public Entity Resolve(SpawnRecord r)
         {
-            for (int i = 0; i < entities.Length; i++)
+            if (ByTile.TryGetValue((r.PrefabGuid, r.TileX, r.TileY), out var e) && e.Exists())
+                return e;
+            // Position fallback — the tile re-quantized across a save/load, but the same prefab is
+            // still sitting at (about) the recorded world position. Keeps the object recognizable.
+            if ((r.PosX != 0f || r.PosY != 0f || r.PosZ != 0f)
+                && ByGuid.TryGetValue(r.PrefabGuid, out var sameGuid))
             {
-                var e = entities[i];
-                if (!e.TryGetComponent<PrefabGUID>(out var g) || g._Value != r.PrefabGuid) continue;
-                if (!e.TryGetComponent<TilePosition>(out var tp)) continue;
-                if (tp.Tile.x == r.TileX && tp.Tile.y == r.TileY) return e;
+                Entity best = Entity.Null;
+                float bestSq = 4f; // within 2m
+                foreach (var c in sameGuid)
+                {
+                    if (!c.TryGetComponent<Translation>(out var t)) continue;
+                    float dx = t.Value.x - r.PosX, dy = t.Value.y - r.PosY, dz = t.Value.z - r.PosZ;
+                    float dsq = dx * dx + dy * dy + dz * dz;
+                    if (dsq < bestSq) { bestSq = dsq; best = c; }
+                }
+                if (best != Entity.Null) return best;
             }
+            return Entity.Null;
         }
-        finally { entities.Dispose(); }
-        return Entity.Null;
     }
 
-    /// <summary>
-    /// Boot re-apply: rebuild the live cache from the registry, re-assert Immortal/decay,
-    /// drop records whose object is gone, and (config-gated) destroy "orphans" whose castle
-    /// heart no longer exists — so spawned objects vanish with a destroyed/decayed castle.
-    /// </summary>
-    public void ReapplySpawned()
+    LiveIndex BuildLiveIndex()
     {
-        if (_records.Count == 0) return;
-
-        // One sweep over all tile objects -> (guid,tileX,tileY) -> entity (avoids an N-record query storm).
-        var index = new Dictionary<(int, int, int), Entity>();
+        var index = new LiveIndex();
         var builder = new EntityQueryBuilder(Allocator.Temp)
             .AddAll(new(Il2CppType.Of<PrefabGUID>(), ComponentType.AccessMode.ReadOnly))
             .AddAll(new(Il2CppType.Of<TilePosition>(), ComponentType.AccessMode.ReadOnly))
@@ -278,27 +289,75 @@ internal sealed class ObjectSpawnService
                 var e = entities[i];
                 if (!e.TryGetComponent<PrefabGUID>(out var g)) continue;
                 if (!e.TryGetComponent<TilePosition>(out var tp)) continue;
-                index[(g._Value, tp.Tile.x, tp.Tile.y)] = e;
+                index.ByTile[(g._Value, tp.Tile.x, tp.Tile.y)] = e;
+                if (!index.ByGuid.TryGetValue(g._Value, out var list))
+                    index.ByGuid[g._Value] = list = new List<Entity>();
+                list.Add(e);
             }
         }
         finally { entities.Dispose(); }
+        return index;
+    }
 
+    /// <summary>Find the registry record whose live entity is nearest to <paramref name="pos"/>
+    /// (within <paramref name="maxDist"/>), re-resolving each record to its current entity. Registry-
+    /// driven, so it keeps targeting objects across relog/restart — not just this session's spawns.</summary>
+    (Entity Entity, SpawnRecord Record) NearestSpawnedRecord(float3 pos, float maxDist)
+    {
+        if (_records.Count == 0) return (Entity.Null, null);
+        var index = BuildLiveIndex();
+        float bestSq = maxDist * maxDist;
+        Entity best = Entity.Null;
+        SpawnRecord bestRec = null;
+        foreach (var r in _records)
+        {
+            Entity e = index.Resolve(r);
+            if (e == Entity.Null || !e.TryGetComponent<Translation>(out var t)) continue;
+            float dx = t.Value.x - pos.x, dy = t.Value.y - pos.y, dz = t.Value.z - pos.z;
+            float dsq = dx * dx + dy * dy + dz * dz;
+            if (dsq < bestSq) { bestSq = dsq; best = e; bestRec = r; }
+        }
+        return (best, bestRec);
+    }
+
+    /// <summary>
+    /// Boot re-apply: re-assert Immortal/decay on spawned objects and (config-gated) destroy
+    /// confirmed "orphans" whose castle heart no longer exists. NON-DESTRUCTIVE to the registry:
+    /// a record that does not resolve this boot is KEPT, never deleted — the world may still be
+    /// streaming in, and an object that is merely streamed out must not be forgotten (the old
+    /// behavior deleted such records and wrote the emptied file, permanently losing them). Mirrors
+    /// PublicStorageService.ReapplyAll, which keeps unresolved entries and logs them.
+    /// </summary>
+    public void ReapplySpawned()
+    {
+        if (_records.Count == 0) return;
+
+        var index = BuildLiveIndex();
         bool purgeOrphans = Settings.ObjectSpawn_PurgeOrphansOnBoot.Value;
-        int restored = 0, orphaned = 0, gone = 0;
+        int restored = 0, orphaned = 0, unresolved = 0;
+        bool changed = false;
         foreach (var r in new List<SpawnRecord>(_records))
         {
-            if (!index.TryGetValue((r.PrefabGuid, r.TileX, r.TileY), out Entity e) || !e.Exists())
+            Entity e = index.Resolve(r);
+            if (e == Entity.Null)
             {
-                _records.Remove(r); // object no longer present (dismantled / removed)
-                gone++;
+                unresolved++; // not loaded yet / streamed out — KEEP the record (do not forget it)
                 continue;
             }
-            // Orphan check: did the owning castle heart disappear? (disabled-included, so not transient.)
+            // Backfill world position for pre-v2 records now that we have the live entity.
+            if (r.PosX == 0f && r.PosY == 0f && r.PosZ == 0f && e.TryGetComponent<Translation>(out var tr))
+            {
+                r.PosX = tr.Value.x; r.PosY = tr.Value.y; r.PosZ = tr.Value.z;
+                changed = true;
+            }
+            // Orphan check: the object resolved (so the world IS loaded here), but its owning castle
+            // heart is confirmed gone (disabled-included query) — the castle was destroyed/decayed.
             if (purgeOrphans && r.HasHeart && !HeartExistsByTile(r.HeartTileX, r.HeartTileY))
             {
-                DestroyUtility.Destroy(Core.EntityManager, e);
+                DestroySpawned(e);
                 _records.Remove(r);
                 orphaned++;
+                changed = true;
                 continue;
             }
             if (r.Indestructible)
@@ -307,11 +366,11 @@ internal sealed class ObjectSpawnService
                 if (e.Has<CastleDecayAndRegen>()) e.With((ref CastleDecayAndRegen d) => d.CanDieFromDecay = false);
                 else e.AddOrSet(new CastleDecayAndRegen { CanDieFromDecay = false });
             }
-            _spawned.Add(e);
             restored++;
         }
-        SaveSync();
-        Core.Log.LogInfo($"[Uriel SPAWN] restored {restored} object(s); {orphaned} orphan(s) purged (castle gone); {gone} no longer present.");
+        if (changed) SaveSync();
+        Core.Log.LogInfo($"[Uriel SPAWN] re-applied {restored} object(s); {orphaned} orphan(s) purged (castle gone); " +
+                         $"{unresolved} not resolved this boot (KEPT — may be streaming in).");
     }
 
     // ============================================================ castle territory / ownership
@@ -1229,8 +1288,6 @@ internal sealed class ObjectSpawnService
                 }
             }
 
-            _spawned.Add(e);
-            PruneSpawned();
             RegisterRecord(e, indestructible, territory, heart, character.GetSteamId(), paidItem, paidAmount);
             Core.Log.LogInfo($"[Uriel SPAWN] {name}({guid._Value}) at ({pos.x:F1},{pos.y:F1},{pos.z:F1}) rot={rotation & 3} immortal={indestructible} territory={territory} cost={paidAmount}x{paidItem}. {adoptNote}");
             string costNote = paidAmount > 0 ? $" Paid {paidAmount}x {new PrefabGUID(paidItem).GetPrefabName()}." : "";
@@ -1322,18 +1379,18 @@ internal sealed class ObjectSpawnService
     public bool Despawn(Entity character, bool isAdmin, out string message)
     {
         if (!TryGetTargetPosition(character, out float3 pos)) { message = "Could not read your position."; return false; }
-        Entity target = NearestSpawned(pos, Settings.ObjectSpawn_MaxTargetDistance.Value);
+        var (target, rec) = NearestSpawnedRecord(pos, Settings.ObjectSpawn_MaxTargetDistance.Value);
         if (target == Entity.Null)
         {
             message = $"No Uriel-spawned object within {Settings.ObjectSpawn_MaxTargetDistance.Value:F0}m. " +
-                      "(despawn/move/rotate target objects spawned by Uriel; '.uriel purgeplot' clears a whole plot.)";
+                      "(despawn/move/rotate target objects spawned by Uriel; '.uriel purgeplot' clears a whole plot; " +
+                      "admins can '.uriel forcedespawn' an untracked object.)";
             return false;
         }
         if (!isAdmin && !CallerOwnsObject(character, target))
         { message = "You can only remove objects in your own castle plot."; return false; }
 
         string name = target.GetPrefabGuid().GetPrefabName();
-        var rec = FindRecordFor(target);
 
         // Optional refund: give the spawner back what they paid (their own object only).
         string refundNote = "";
@@ -1346,8 +1403,7 @@ internal sealed class ObjectSpawnService
         }
         if (rec != null) { _records.Remove(rec); SaveSync(); }
 
-        DestroyUtility.Destroy(Core.EntityManager, target);
-        _spawned.Remove(target);
+        DestroySpawned(target);
         Core.Log.LogInfo($"[Uriel SPAWN] despawned {name}.");
         message = $"Removed {name}.{refundNote}";
         return true;
@@ -1360,7 +1416,7 @@ internal sealed class ObjectSpawnService
     {
         if (!PublicStorageService.TryGetCharacterPosition(character, out float3 feet))
         { message = "Could not read your position."; return false; }
-        Entity target = NearestSpawned(feet, Settings.ObjectSpawn_MaxTargetDistance.Value);
+        var (target, rec) = NearestSpawnedRecord(feet, Settings.ObjectSpawn_MaxTargetDistance.Value);
         if (target == Entity.Null)
         {
             message = $"No Uriel-spawned object within {Settings.ObjectSpawn_MaxTargetDistance.Value:F0}m to move. " +
@@ -1374,7 +1430,7 @@ internal sealed class ObjectSpawnService
         { message = gateErr; return false; }
 
         string name = target.GetPrefabGuid().GetPrefabName();
-        if (!RespawnAt(target, aim.AimPosition, CurrentRot(target), heart, territory, out _, out string err)) { message = err; return false; }
+        if (!RespawnAt(target, rec, aim.AimPosition, CurrentRot(target), heart, territory, out _, out string err)) { message = err; return false; }
         Core.Log.LogInfo($"[Uriel SPAWN] moved {name} to ({aim.AimPosition.x:F1},{aim.AimPosition.y:F1},{aim.AimPosition.z:F1}).");
         message = $"Moved {name} to your aim point.";
         return true;
@@ -1385,7 +1441,7 @@ internal sealed class ObjectSpawnService
     public bool Rotate(Entity character, bool isAdmin, int? rotation, out string message)
     {
         if (!TryGetTargetPosition(character, out float3 pos)) { message = "Could not read your position."; return false; }
-        Entity target = NearestSpawned(pos, Settings.ObjectSpawn_MaxTargetDistance.Value);
+        var (target, rec) = NearestSpawnedRecord(pos, Settings.ObjectSpawn_MaxTargetDistance.Value);
         if (target == Entity.Null)
         { message = $"No Uriel-spawned object within {Settings.ObjectSpawn_MaxTargetDistance.Value:F0}m to rotate."; return false; }
         if (!target.TryGetComponent<Translation>(out var t)) { message = "Object has no position to preserve."; return false; }
@@ -1395,7 +1451,7 @@ internal sealed class ObjectSpawnService
 
         int newRot = (rotation ?? CurrentRot(target) + 1) & 3;
         string name = target.GetPrefabGuid().GetPrefabName();
-        if (!RespawnAt(target, t.Value, newRot, heart, territory, out _, out string err)) { message = err; return false; }
+        if (!RespawnAt(target, rec, t.Value, newRot, heart, territory, out _, out string err)) { message = err; return false; }
         Core.Log.LogInfo($"[Uriel SPAWN] rotated {name} to rot {newRot}.");
         message = $"Rotated {name} to rotation {newRot}.";
         return true;
@@ -1404,7 +1460,7 @@ internal sealed class ObjectSpawnService
     /// <summary>Destroy a spawned object and re-spawn the same prefab at a new transform,
     /// preserving its indestructible state, re-adopting into <paramref name="heart"/>, and
     /// keeping the registry + live cache in sync.</summary>
-    bool RespawnAt(Entity target, float3 pos, int rot, Entity heart, int territory, out Entity result, out string error)
+    bool RespawnAt(Entity target, SpawnRecord old, float3 pos, int rot, Entity heart, int territory, out Entity result, out string error)
     {
         result = Entity.Null;
         error = null;
@@ -1414,7 +1470,6 @@ internal sealed class ObjectSpawnService
         { error = "Could not re-resolve the object's prefab."; return false; }
 
         bool indestructible = target.TryGetComponent<Immortal>(out var im) && im.IsImmortal;
-        var old = FindRecordFor(target);
         ulong by = old?.SpawnedBySteamId ?? 0;
         int paidItem = old?.PaidCostItem ?? 0;       // a move/rotate re-spawns — never re-charge
         int paidAmount = old?.PaidCostAmount ?? 0;
@@ -1422,12 +1477,9 @@ internal sealed class ObjectSpawnService
         try
         {
             if (old != null) _records.Remove(old);
-            DestroyUtility.Destroy(Core.EntityManager, target);
-            _spawned.Remove(target);
+            DestroySpawned(target);
             Entity e = ExecuteSpawn(prefab, pos, rot, indestructible, heart, out _);
             if (e == Entity.Null) { error = "Re-spawn failed (prefab did not resolve)."; SaveSync(); return false; }
-            _spawned.Add(e);
-            PruneSpawned();
             RegisterRecord(e, indestructible, territory, heart, by, paidItem, paidAmount);
             result = e;
             return true;
@@ -1478,16 +1530,14 @@ internal sealed class ObjectSpawnService
         if (!TryResolvePlot(pos, out _, out int territory))
         { message = "You're not standing in a castle plot."; return false; }
 
+        var index = BuildLiveIndex();
         int removed = 0;
         foreach (var r in new List<SpawnRecord>(_records))
         {
             if (r.TerritoryIndex != territory) continue;
-            Entity e = ResolveRecord(r);
+            Entity e = index.Resolve(r);
             if (e != Entity.Null)
-            {
-                DestroyUtility.Destroy(Core.EntityManager, e);
-                _spawned.Remove(e);
-            }
+                DestroySpawned(e);
             _records.Remove(r);
             removed++;
         }
@@ -1504,16 +1554,15 @@ internal sealed class ObjectSpawnService
     public string DescribeNearest(Entity character)
     {
         if (!TryGetTargetPosition(character, out float3 pos)) return "Could not read your position.";
-        PruneSpawned();
-        Entity target = NearestSpawned(pos, Settings.ObjectSpawn_MaxTargetDistance.Value);
+        var (target, rec) = NearestSpawnedRecord(pos, Settings.ObjectSpawn_MaxTargetDistance.Value);
         if (target == Entity.Null)
-            return $"No Uriel-spawned object within {Settings.ObjectSpawn_MaxTargetDistance.Value:F0}m. ({_spawned.Count} tracked this session, {_records.Count} persisted.)";
+            return $"No Uriel-spawned object within {Settings.ObjectSpawn_MaxTargetDistance.Value:F0}m ({_records.Count} persisted). " +
+                   "If you spawned it in an older build it may be untracked — admins can '.uriel forcedespawn' it.";
         var sb = new StringBuilder($"{target.GetPrefabGuid().GetPrefabName()} ({target.GetPrefabGuid()._Value})");
         if (target.TryGetComponent<Immortal>(out var im)) sb.Append($" | immortal={im.IsImmortal}");
         if (target.TryGetComponent<CastleDecayAndRegen>(out var d)) sb.Append($" | canDecay={d.CanDieFromDecay}");
         if (target.TryGetComponent<CastleHeartConnection>(out var c))
             sb.Append($" | heart={(c.CastleHeartEntity.GetEntityOnServer().Exists() ? "owned" : "unowned")}");
-        var rec = FindRecordFor(target);
         if (rec != null) sb.Append($" | plot={rec.TerritoryIndex}");
         return Clamp(sb.ToString());
     }
@@ -1536,20 +1585,208 @@ internal sealed class ObjectSpawnService
         return PublicStorageService.TryGetCharacterPosition(character, out pos);
     }
 
-    Entity NearestSpawned(float3 pos, float maxDist)
+    // ============================================================ admin force-purge (records ignored)
+
+    /// <summary>Pending '.uriel forcedespawn' confirmation (one per admin). Force-despawn ignores
+    /// Uriel ownership/records entirely, so it asks for an explicit confirm naming the exact prefab
+    /// first — recovering objects no record tracks (e.g. chain-era spawns) without a careless nuke.</summary>
+    sealed class PendingForce
     {
-        PruneSpawned();
+        public int Guid;
+        public int TileX, TileY;
+        public float PosX, PosY, PosZ;
+        public string Name;
+        public DateTime ExpiresUtc;
+    }
+
+    readonly Dictionary<ulong, PendingForce> _pendingForce = new();
+    static readonly TimeSpan ForceConfirmWindow = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Destroy a spawned object AND any spawn-chain controller that is looping it. Objects spawned
+    /// in the chain-controller era are the *child* of a `Chain_*` controller whose
+    /// `SpawnChainInstance.LoopOnEndOfChain` re-spawns the child the instant it dies — so destroying
+    /// the child alone makes it "flash and reappear" (owner live-test, 2026-06-08). The runtime child
+    /// carries `SpawnChainChild.SpawnChain` → its controller; we kill the controller first (which also
+    /// tears the child down), then the child if anything remains. A normally-spawned Uriel object has
+    /// no `SpawnChainChild`, so this is just a plain destroy for it.
+    /// </summary>
+    void DestroySpawned(Entity e)
+    {
+        if (!e.Exists()) return;
+        try
+        {
+            if (e.TryGetComponent<SpawnChainChild>(out var scc) && scc.SpawnChain.Exists())
+            {
+                Core.Log.LogInfo($"[Uriel SPAWN] destroying spawn-chain controller {scc.SpawnChain} that loops {e.GetPrefabGuid().GetPrefabName()} (stops the respawn).");
+                DestroyUtility.Destroy(Core.EntityManager, scc.SpawnChain);
+            }
+        }
+        catch (Exception ex) { Core.Log.LogWarning($"[Uriel SPAWN] chain-controller teardown failed: {ex.Message}"); }
+        if (e.Exists()) DestroyUtility.Destroy(Core.EntityManager, e);
+    }
+
+    static long BlockKey(int2 b) => ((long)b.x << 32) ^ (uint)b.y;
+
+    /// <summary>The set of territory block coords for a castle plot (via the heart's CastleTerritory),
+    /// so an object's world position can be tested for plot membership without a per-object territory
+    /// query. Empty set = could not resolve (caller should treat as "no members").</summary>
+    HashSet<long> GetPlotBlocks(Entity heart)
+    {
+        var set = new HashSet<long>();
+        if (!heart.TryGetComponent<CastleHeart>(out var hd)) return set;
+        Entity territory = hd.CastleTerritoryEntity;
+        if (!territory.Exists() || !Core.EntityManager.HasComponent<CastleTerritoryBlocks>(territory)) return set;
+        var blocks = Core.EntityManager.GetBuffer<CastleTerritoryBlocks>(territory);
+        for (int b = 0; b < blocks.Length; b++)
+            set.Add(BlockKey(blocks[b].BlockCoordinate));
+        return set;
+    }
+
+    /// <summary>Nearest placed tile object to a point, regardless of Uriel tracking. Excludes the
+    /// castle heart itself (never let force-despawn nuke the heart). Disabled-included.</summary>
+    Entity NearestTileObject(float3 pos, float maxDist)
+    {
         float bestSq = maxDist * maxDist;
         Entity best = Entity.Null;
-        foreach (var e in _spawned)
+        var builder = new EntityQueryBuilder(Allocator.Temp)
+            .AddAll(new(Il2CppType.Of<PrefabGUID>(), ComponentType.AccessMode.ReadOnly))
+            .AddAll(new(Il2CppType.Of<TilePosition>(), ComponentType.AccessMode.ReadOnly))
+            .AddAll(new(Il2CppType.Of<Translation>(), ComponentType.AccessMode.ReadOnly))
+            .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
+        var query = Core.EntityManager.CreateEntityQuery(ref builder);
+        var entities = query.ToEntityArray(Allocator.Temp);
+        try
         {
-            if (!e.TryGetComponent<Translation>(out var t)) continue;
-            float dx = t.Value.x - pos.x, dy = t.Value.y - pos.y, dz = t.Value.z - pos.z;
-            float dsq = dx * dx + dy * dy + dz * dz;
-            if (dsq < bestSq) { bestSq = dsq; best = e; }
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var e = entities[i];
+                if (e.Has<CastleHeart>()) continue; // never the heart
+                if (!e.TryGetComponent<Translation>(out var t)) continue;
+                float dx = t.Value.x - pos.x, dy = t.Value.y - pos.y, dz = t.Value.z - pos.z;
+                float dsq = dx * dx + dy * dy + dz * dz;
+                if (dsq < bestSq) { bestSq = dsq; best = e; }
+            }
         }
+        finally { entities.Dispose(); }
         return best;
     }
 
-    void PruneSpawned() => _spawned.RemoveAll(e => !e.Exists());
+    /// <summary>
+    /// Admin: force-remove the object you're aiming at / nearest you, IGNORING Uriel records and
+    /// ownership — recovers objects no registry tracks (e.g. a chain-era spawn). Two-step: the first
+    /// call names the exact prefab and arms a 30s confirm; <paramref name="confirm"/>=true within the
+    /// window destroys it. Any matching Uriel record is also cleaned up.
+    /// </summary>
+    public bool ForceDespawn(Entity character, bool confirm, out string message)
+    {
+        ulong steamId = character.GetSteamId();
+        if (!TryGetTargetPosition(character, out float3 pos)) { message = "Could not read your position."; return false; }
+        float maxDist = Settings.ObjectSpawn_MaxTargetDistance.Value;
+
+        if (confirm)
+        {
+            if (!_pendingForce.TryGetValue(steamId, out var pend) || pend.ExpiresUtc < DateTime.UtcNow)
+            {
+                _pendingForce.Remove(steamId);
+                message = "Nothing armed (or it expired). Run '.uriel forcedespawn' first to target an object.";
+                return false;
+            }
+            _pendingForce.Remove(steamId);
+            // Re-resolve the exact armed object from the live world (its entity may have re-created).
+            var index = BuildLiveIndex();
+            Entity target = index.Resolve(new SpawnRecord
+            {
+                PrefabGuid = pend.Guid, TileX = pend.TileX, TileY = pend.TileY,
+                PosX = pend.PosX, PosY = pend.PosY, PosZ = pend.PosZ,
+            });
+            if (target == Entity.Null) { message = $"The armed {pend.Name} is no longer there."; return false; }
+
+            // Drop any Uriel record for it too, so the registry stays consistent.
+            _records.RemoveAll(r => r.PrefabGuid == pend.Guid && r.TileX == pend.TileX && r.TileY == pend.TileY);
+            SaveSync();
+            DestroySpawned(target); // also tears down any looping spawn-chain controller
+            Core.Log.LogInfo($"[Uriel SPAWN] force-despawned {pend.Name} ({pend.Guid}) at tile ({pend.TileX},{pend.TileY}) by admin {steamId}.");
+            message = $"Force-removed {pend.Name}.";
+            return true;
+        }
+
+        Entity nearest = NearestTileObject(pos, maxDist);
+        if (nearest == Entity.Null)
+        {
+            message = $"No object within {maxDist:F0}m to force-remove. Aim directly at it and try again.";
+            return false;
+        }
+        string name = nearest.GetPrefabGuid().GetPrefabName();
+        nearest.TryGetComponent<TilePosition>(out var tp);
+        nearest.TryGetComponent<Translation>(out var tr);
+        _pendingForce[steamId] = new PendingForce
+        {
+            Guid = nearest.GetPrefabGuid()._Value,
+            TileX = tp.Tile.x, TileY = tp.Tile.y,
+            PosX = tr.Value.x, PosY = tr.Value.y, PosZ = tr.Value.z,
+            Name = name,
+            ExpiresUtc = DateTime.UtcNow + ForceConfirmWindow,
+        };
+        message = $"About to FORCE-REMOVE {name} (ignores Uriel ownership; irreversible). " +
+                  "Run '.uriel forcedespawn confirm' within 30s to delete it. Re-aim and re-run to retarget.";
+        return true;
+    }
+
+    /// <summary>
+    /// Admin: force-purge every Uriel-LIKE object on the plot you're standing in, even ones no record
+    /// tracks (chain-era spawns included). Scoped to this plot by territory blocks (cheap O(1) per
+    /// object). An object is "ours" if it carries our indestructible signature (Immortal), is a
+    /// spawn-chain child (`SpawnChainChild` — the chain-era chest case, which has neither Immortal
+    /// nor a heart link), or is connected to THIS castle's heart. Native build-menu pieces
+    /// (BlueprintData) and the heart are always left alone. Each kill also tears down any looping
+    /// chain controller. Also clears this plot's registry records.
+    /// </summary>
+    public bool ForcePurgePlot(Entity character, out string message)
+    {
+        if (!PublicStorageService.TryGetCharacterPosition(character, out var pos))
+        { message = "Could not read your position."; return false; }
+        if (!TryResolvePlot(pos, out Entity heart, out int territory))
+        { message = "You're not standing in a castle plot."; return false; }
+
+        var blocks = GetPlotBlocks(heart);
+        if (blocks.Count == 0) { message = "Could not resolve this castle's territory blocks; aborted (nothing removed)."; return false; }
+
+        var toDestroy = new List<Entity>();
+        var builder = new EntityQueryBuilder(Allocator.Temp)
+            .AddAll(new(Il2CppType.Of<PrefabGUID>(), ComponentType.AccessMode.ReadOnly))
+            .AddAll(new(Il2CppType.Of<TilePosition>(), ComponentType.AccessMode.ReadOnly))
+            .AddAll(new(Il2CppType.Of<Translation>(), ComponentType.AccessMode.ReadOnly))
+            .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
+        var query = Core.EntityManager.CreateEntityQuery(ref builder);
+        var entities = query.ToEntityArray(Allocator.Temp);
+        try
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var e = entities[i];
+                if (e.Has<CastleHeart>()) continue;   // never the heart
+                if (e.Has<BlueprintData>()) continue; // native build-menu piece — leave it
+                if (!e.TryGetComponent<Translation>(out var tr)) continue;
+                if (!blocks.Contains(BlockKey(ConvertPosToBlockCoord(tr.Value)))) continue; // this plot only
+                bool ours = (e.TryGetComponent<Immortal>(out var im) && im.IsImmortal)
+                            || e.Has<SpawnChainChild>()
+                            || (e.TryGetComponent<CastleHeartConnection>(out var c) && c.CastleHeartEntity.GetEntityOnServer() == heart);
+                if (ours) toDestroy.Add(e);
+            }
+        }
+        finally { entities.Dispose(); }
+
+        int removed = 0;
+        foreach (var e in toDestroy) { DestroySpawned(e); removed++; }
+
+        int recordsCleared = _records.RemoveAll(r => r.TerritoryIndex == territory);
+        if (recordsCleared > 0) SaveSync();
+        Core.Log.LogInfo($"[Uriel SPAWN] force-purged {removed} object(s) (+{recordsCleared} record(s)) from territory {territory} by admin {character.GetSteamId()}.");
+        message = removed == 0 && recordsCleared == 0
+            ? "No Uriel-like objects (or records) found on this plot."
+            : $"Force-purged {removed} object(s) on this plot (cleared {recordsCleared} record(s)). " +
+              "Native build-menu pieces were left untouched.";
+        return true;
+    }
 }

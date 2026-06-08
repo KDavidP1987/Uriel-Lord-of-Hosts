@@ -8,6 +8,53 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.16.0] - 2026-06-08
+
+### Fixed — Object Spawning: cross-session management & chain-object removal
+
+Owner live-testing of 0.15.0 surfaced two persistence defects and one removal
+defect in the Object Spawning feature; all are fixed.
+
+- **Spawned objects became unmanageable after a relog or server restart.**
+  `.uriel despawn`/`move`/`rotate`/`spawninfo` reported "no Uriel object within
+  Nm" while standing on the object. Two root causes:
+  - *Stale entity cache.* Targeting walked an in-memory `List<Entity>` rebuilt
+    only at boot. The engine recreates a castle object's entity (new handle)
+    every time the castle streams out and back in — a player relogging, leaving
+    and returning to the territory, or a server restart — so the cached handles
+    went invalid and nothing re-resolved them. The cache is removed; management
+    now re-resolves each object from the persisted registry **on demand** (by
+    prefab GUID + tile, with a **world-position fallback** for save/load tile
+    drift), mirroring the proven `PublicStorageService` resolution model. Records
+    now store world position (`spawned_objects.json` schema v2; older records are
+    backfilled on first resolve).
+  - *Destructive boot re-apply.* `ReapplySpawned` deleted any record it couldn't
+    match in one early boot sweep and wrote the emptied file — so an object that
+    was merely streamed-out (or not yet loaded) was **forgotten permanently**.
+    Boot re-apply is now non-destructive: unresolved records are kept and logged;
+    only a *confirmed* orphan (object present but its castle heart gone) is purged.
+- **Removing a chain-spawned object made it "flash and reappear."** Objects
+  spawned in the early chain-controller era are the *child* of a `Chain_*`
+  controller whose `SpawnChainInstance.LoopOnEndOfChain` re-spawns the child the
+  instant it dies — and the controller (at world-origin, no tile/heart/Immortal)
+  was untargetable. All removals now route through one helper that, when the
+  object carries `SpawnChainChild`, destroys the **looping controller first**
+  (stopping the respawn) and then the child.
+
+### Added — admin recovery commands for untracked objects
+
+- **`.uriel forcedespawn [confirm]`** (admin) — force-remove the object you're
+  aiming at / nearest you, **ignoring Uriel records and ownership** (recovers
+  objects no registry tracks, e.g. chain-era spawns). The first call names the
+  exact prefab and arms a 30-second confirm; `.uriel forcedespawn confirm`
+  deletes it. Never targets the castle heart; also tears down any looping chain
+  controller.
+- **`.uriel forcepurgeplot`** (admin) — force-remove **every** Uriel-like object
+  on the plot you're standing in, including untracked chain-era children. Scoped
+  to the plot by its territory blocks; matches objects that are indestructible
+  (`Immortal`), a spawn-chain child, or connected to this castle's heart. Native
+  build-menu pieces (`BlueprintData`) and the heart are always left untouched.
+
 ## [0.15.0] - 2026-06-08
 
 ### Added — Object Spawning: collect & place world objects into your castle

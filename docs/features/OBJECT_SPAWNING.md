@@ -89,6 +89,8 @@ be built/decorated with — beyond the standard build menu. Two object worlds:
 | `.uriel despawn` | Remove the nearest spawned object you're aiming at / standing near (cross-session). |
 | `.uriel spawnlist` | List the Uriel-spawned objects on the castle plot you're standing in. |
 | `.uriel purgeplot` | Remove ALL Uriel-spawned objects on the plot you're standing in (admin-only). |
+| `.uriel forcedespawn [confirm]` | **Admin** — force-remove the aimed/nearest object IGNORING Uriel records/ownership (recovers untracked objects, e.g. chain-era spawns). Arm (names the prefab), then `confirm` within 30s. |
+| `.uriel forcepurgeplot` | **Admin** — force-remove every Uriel-LIKE indestructible object adopted into the plot (even untracked ones); native build pieces + breakables are left. |
 | `.uriel findprefab <text>` | Search the **placeable-object** catalog by name (paged, ranked) to discover GUIDs/names to spawn. |
 | `.uriel spawninfo` | Inspect the aimed/nearest spawned object (prefab, owner heart, flags, plot). |
 
@@ -383,6 +385,66 @@ removed; castle adoption (add CastleHeartConnection/Team/UserOwner) + Immortal/d
   large object mis-registers on the grid.
 - `GetTerritoryIndex`/heart resolution rebuild their queries per call (fine at admin-spawn
   frequency); cache with a short TTL if it ever shows up on a busy server.
+
+**🐛 Cross-session tracking FIX (Session 9, 2026-06-08 — owner live-test feedback).**
+After v0.15.0 testing, the owner found spawned objects became unmanageable after a
+**relog or server restart**: `despawn`/`move`/`rotate`/`spawninfo` reported "no Uriel
+object within Nm" while standing on the object. Two distinct defects (both fixed):
+- **(1) Stale entity cache.** All targeting walked an in-memory `List<Entity> _spawned`
+  rebuilt only at boot. The engine recreates a castle object's entity (new handle)
+  whenever the castle streams out and back in — relog, leaving/returning to the
+  territory, OR a restart — so the cached handles went invalid, `PruneSpawned` dropped
+  them, and nothing re-resolved the records to the new entities. **Fix:** removed the
+  cache entirely; management now re-resolves each registry record to its CURRENT live
+  entity on demand (`BuildLiveIndex` → `LiveIndex.Resolve`: match by prefab GUID + tile,
+  with a **world-position fallback** for tile drift), mirroring the proven
+  `PublicStorageService` (which keeps no entity cache). `SpawnRecord` now stores
+  `PosX/Y/Z` (schema v2; backfilled for old records on first resolve).
+- **(2) Destructive boot re-apply.** `ReapplySpawned` ran at `GameDataInitialized` and
+  `_records.Remove(r)` + `SaveSync()` for any record it couldn't match in that one
+  sweep — so an object merely streamed-out (or not yet loaded) was **permanently
+  deleted from the registry** and the emptied file written to disk. **Fix:** re-apply is
+  now NON-DESTRUCTIVE — unresolved records are KEPT and logged (like `ReapplyAll`); only
+  a CONFIRMED orphan (object resolved but its heart is gone) is purged.
+- **(3) Untracked-object recovery (admin).** Objects from the chain-controller era (or any
+  record lost to defect 2) have no registry entry, so they can't be reached *by record*.
+  New admin commands ignore records entirely: **`.uriel forcedespawn [confirm]`** (arm →
+  names the exact prefab → `confirm` within 30s → destroy the aimed object; never targets
+  the castle heart) and **`.uriel forcepurgeplot`** (destroy every object adopted into the
+  plot's heart that carries our indestructible signature — `Immortal`, no `BlueprintData`
+  — leaving native build pieces and breakables alone).
+
+**🔬 Session 9 follow-up — why the stuck chest survived force-despawn (owner live-test).**
+The log showed `force-despawned TM_WorldChest_Epic_01_Full (-1657744516) at tile (2338,3012)`
+succeed, yet the chest **flashed and reappeared**, and `forcepurgeplot` matched **0**. Root
+cause confirmed from the prefab dump: that chest is the *child* of a `Chain_*` spawn-chain
+controller (`Chain_Container_WorldChest_Epic_01`) whose `SpawnChainData.SpawnChainInstance
+{ LoopOnEndOfChain = true }` **re-spawns the child the instant it dies**. Force-despawn
+destroyed the child; the still-living controller (sits at world-origin, no TilePosition/heart/
+Immortal — untargetable by either command) looped and re-created it. And the child chest prefab
+carries **no `Immortal` and no `CastleHeartConnection`**, so `forcepurgeplot`'s old filter
+(Immortal + heart-connected) matched nothing.
+- **The link:** the runtime child carries `ProjectM.Shared.SpawnChainChild { Entity SpawnChain;
+  int SpawnChainElementIndex }` → its controller (verified by reflecting the ref assemblies).
+- **Fix (Session 9b):** a single `DestroySpawned(e)` now routes ALL removals (despawn, move/rotate
+  respawn, purgeplot, forcedespawn, forcepurgeplot, orphan purge): if the object has
+  `SpawnChainChild`, its controller is destroyed FIRST (stops the loop, tears down the child), then
+  the child if anything remains. `forcepurgeplot` was rewritten to scope by the plot's
+  `CastleTerritoryBlocks` (O(1) per object) and match objects that are Immortal **OR** a
+  `SpawnChainChild` **OR** heart-connected — so chain-era children are now caught. Native
+  build-menu pieces (`BlueprintData`) and the heart are always skipped.
+
+**⏳ Session 9 live tests (run after restart):**
+1. **Cross-session manage** — spawn an object, relog (and separately, restart the
+   server), then `.uriel spawninfo` / `move` / `rotate` / `despawn` while standing on it:
+   all should now target it. Boot log: `re-applied N object(s); 0 orphan(s) purged;
+   M not resolved this boot (KEPT …)` — and M should be 0 once the castle is loaded.
+2. **No registry wipe** — confirm `spawned_objects.json` is NOT emptied across a restart.
+3. **forcedespawn** — aim at the old stuck chest → `.uriel forcedespawn` names it →
+   `.uriel forcedespawn confirm` removes it. Aiming at a wall/floor names that instead
+   (don't confirm) — proves the naming safeguard.
+4. **forcepurgeplot** — clears the plot's leftover indestructibles in one shot; a native
+   bench/wall on the same plot survives.
 
 ## Phase 2 — player access: mode + discovery + cost (BUILT Session 6, 2026-06-08; awaiting live test)
 

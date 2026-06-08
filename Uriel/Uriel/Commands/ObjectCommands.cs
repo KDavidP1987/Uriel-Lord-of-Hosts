@@ -88,6 +88,23 @@ internal static class ObjectCommands
         ctx.Reply(Core.ObjectSpawn.DescribeNearest(ctx.Event.SenderCharacterEntity));
     }
 
+    [Command("forcedespawn", description: "Admin: force-remove the object you're aiming at, IGNORING Uriel ownership/records (recovers untracked objects, e.g. from older builds). Run once to arm (names it), then '.uriel forcedespawn confirm' within 30s. Usage: .uriel forcedespawn [confirm]", adminOnly: true)]
+    public static void ForceDespawn(ChatCommandContext ctx, string confirm = null)
+    {
+        if (!Ready(ctx)) return;
+        bool isConfirm = "confirm".Equals(confirm?.Trim(), StringComparison.OrdinalIgnoreCase);
+        Core.ObjectSpawn.ForceDespawn(ctx.Event.SenderCharacterEntity, isConfirm, out string message);
+        ctx.Reply(message);
+    }
+
+    [Command("forcepurgeplot", description: "Admin: force-remove EVERY Uriel-like indestructible object adopted into the plot you're standing in, even untracked ones (native build pieces and breakables are left). Usage: .uriel forcepurgeplot", adminOnly: true)]
+    public static void ForcePurgePlot(ChatCommandContext ctx)
+    {
+        if (!Ready(ctx)) return;
+        Core.ObjectSpawn.ForcePurgePlot(ctx.Event.SenderCharacterEntity, out string message);
+        ctx.Reply(message);
+    }
+
     [Command("unlocks", description: "List the objects you've unlocked for building. Admins can pass a player name to view theirs. Usage: .uriel unlocks [player]")]
     public static void Unlocks(ChatCommandContext ctx, string player = null)
     {
