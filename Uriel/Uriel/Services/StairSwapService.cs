@@ -8,6 +8,7 @@ using ProjectM.Shared;
 using Stunlock.Core;
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Transforms;
 using Uriel.Config;
 
 namespace Uriel.Services;
@@ -367,6 +368,356 @@ internal sealed class StairSwapService
         return purged == 0
             ? $"No stair entities found within {radius:F0}m."
             : $"Purged {purged} stair entity(ies) within {radius:F0}m. RESTART the server to flush any remaining ghost grid claims, then rebuild the stairs.";
+    }
+
+    // ----------------------------------------- experimental live visual refresh
+
+    /// <summary>
+    /// EXPERIMENTAL (admin; the action step is gated by [StairSwap]
+    /// ExperimentalLiveRefresh). LIVE FINDING (2026-06-07): placed stairs are NOT
+    /// mega-static — every piece (BP_ root + fused TM_ children) is a NORMAL-networked
+    /// entity (the v0.13.x "MegaStatic bake" theory was wrong). Normal entities ARE
+    /// live-replicated, so the reason a swap needs a restart is narrower: the client
+    /// builds the staircase visual from the root's identity when it FIRST receives the
+    /// structure and does not re-derive it when the root's PrefabGUID changes in place.
+    ///
+    /// This command (a) DUMPS the full runtime component set of the root and every
+    /// fused child to the server log — so we can find whatever carries the cosmetic
+    /// and, if needed, rewrite it — and (b) when the flag is on, RE-STREAMS the whole
+    /// structure through the game's own Disabled→enabled streaming path (the same
+    /// mechanism public-storage uses), so clients drop and re-receive every piece. If
+    /// the client re-derives the cosmetic from the (already-rewritten) root on
+    /// re-receive, the new style appears live. Reversible; never touches the durable
+    /// swap; a restart still renders correctly regardless.
+    /// </summary>
+    public string DiagnoseLiveRefresh(Entity character, bool performAction)
+    {
+        Entity root = ResolveTargetStair(character, out string archetype, out string currentStyle, out string error);
+        if (root == Entity.Null) return error ?? "No staircase targeted.";
+
+        void L(string line) => Core.Log.LogInfo("[Uriel STAIRREFRESH] " + line);
+
+        L($"root={Describe(root)} archetype={archetype} style={currentStyle} performAction={performAction}");
+
+        // The rendered tiles are the fused TM_ children; the root carries the identity.
+        var targets = new List<Entity> { root };
+        if (Core.ServerGameManager.TryGetBuffer<CastleBuildingFusedChildrenBuffer>(root, out var fused))
+        {
+            for (int i = 0; i < fused.Length; i++)
+            {
+                Entity child = fused[i].ChildEntity.GetEntityOnServer();
+                if (child.Exists()) targets.Add(child);
+            }
+        }
+        L($"fused children: {targets.Count - 1}");
+
+        // Per-entity IDENTITY dump. Hypothesis: the swap rewrites only the ROOT's
+        // PrefabGUID/BlueprintData, but a CHILD-level field carries the cosmetic and is
+        // left stale (the restart re-spawns children from the blueprint, which is why
+        // only a restart refreshes). Log each piece's PrefabGUID + BlueprintData.Guid so
+        // we can see whether the children still point at the OLD style.
+        foreach (Entity e in targets)
+        {
+            string netType = e.TryGetComponent<ProjectM.Network.NetworkId>(out var nid) ? nid.Type.ToString() : "none";
+            var pg = e.GetPrefabGuid();
+            string bp = e.TryGetComponent<BlueprintData>(out var bpd)
+                ? $"{bpd.Guid.GetPrefabName()}({bpd.Guid._Value})"
+                : "none";
+            L($"  {Describe(e)}: NetId={netType} static={e.Has<StaticTransformCompatible>()} PrefabGUID={pg.GetPrefabName()}({pg._Value}) BlueprintData.Guid={bp}");
+        }
+
+        if (!performAction)
+            return $"Stair diagnostic written to the server log (root + {targets.Count - 1} child tile(s), full component dumps). No change made — set [StairSwap] ExperimentalLiveRefresh=true to test the live re-stream.";
+
+        // EXPERIMENT v2: RE-BAKE each piece's visual blobs from its CURRENT prefab, then
+        // re-stream. The placed pieces kept the blob references (TileData, and the root's
+        // NetworkedPrefabChildren) that were resolved at ORIGINAL placement (old style);
+        // an in-place PrefabGUID rewrite never refreshes those blobs, which is why only a
+        // restart (= fresh spawn from the new blueprint) shows the new look. Re-copying
+        // the blobs from each piece's current prefab is what that fresh spawn does.
+        int rebaked = 0;
+        foreach (Entity e in targets)
+        {
+            try
+            {
+                var pgid = e.GetPrefabGuid();
+                if (!Core.PrefabCollectionSystem._PrefabLookupMap.TryGetValue(pgid, out Entity prefab) || !prefab.Exists())
+                {
+                    L($"    no prefab for {Describe(e)} — skipped rebake");
+                    continue;
+                }
+                bool didTile = false, didChildren = false;
+                if (e.Has<ProjectM.TileData>() && prefab.TryGetComponent<ProjectM.TileData>(out var ptd))
+                {
+                    e.With((ref ProjectM.TileData x) => x.Data = ptd.Data);
+                    didTile = true;
+                }
+                if (e.Has<ProjectM.Tiles.NetworkedPrefabChildren>() && prefab.TryGetComponent<ProjectM.Tiles.NetworkedPrefabChildren>(out var pnpc))
+                {
+                    e.With((ref ProjectM.Tiles.NetworkedPrefabChildren x) => x.Data = pnpc.Data);
+                    didChildren = true;
+                }
+                rebaked++;
+                L($"    rebaked {Describe(e)} from prefab {pgid.GetPrefabName()} (TileData={didTile} NetworkedPrefabChildren={didChildren})");
+            }
+            catch (Exception ex) { L($"    rebake failed for {Describe(e)}: {ex.Message}"); }
+        }
+
+        int restreamed = 0;
+        foreach (Entity e in targets)
+        {
+            try { PublicStorageService.ForceResync(e); restreamed++; }
+            catch (Exception ex) { L($"    re-stream failed for {Describe(e)}: {ex.Message}"); }
+        }
+        L($"rebaked {rebaked}, re-streamed {restreamed} entity(ies).");
+        return $"Stair live-refresh EXPERIMENT v2: re-baked visual blobs (TileData / NetworkedPrefabChildren) on {rebaked} piece(s) from their current prefab, then re-streamed {restreamed}. WATCH the staircase for a few seconds. If it updates → that's the fix and I fold it into the swap. If still nothing → the visual is resolved purely client-side from structure identity and only a true respawn (or client-side BCH) can refresh it. Durable swap unaffected.";
+    }
+
+    static string Describe(Entity e)
+        => e.Exists() ? $"{e.GetPrefabGuid().GetPrefabName()}({e.Index}:{e.Version})" : "Entity.Null";
+
+    // ------------------------------------------- destroy + respawn (experimental)
+
+    /// <summary>Captured state of one stair piece — enough to re-create it as a fresh entity.</summary>
+    sealed class PieceCapture
+    {
+        public PrefabGUID Prefab;
+        public Translation Translation;
+        public bool HasRotation; public Rotation Rotation;
+        public bool HasTilePos; public TilePosition TilePos;
+        public bool HasTileBounds; public TileBounds TileBounds;
+        public bool HasStatic; public StaticTransformCompatible Static;
+        public bool HasTeam; public Team Team;
+        public bool HasTeamRef; public TeamReference TeamRef;
+        public bool HasOwner; public UserOwner Owner;
+        public bool HasHeart; public CastleHeartConnection Heart;
+        public readonly List<Entity> AttachParents = new();
+    }
+
+    static PieceCapture Capture(Entity e, PrefabGUID prefabOverride)
+    {
+        var c = new PieceCapture { Prefab = prefabOverride._Value != 0 ? prefabOverride : e.GetPrefabGuid() };
+        if (e.TryGetComponent<Translation>(out var tr)) c.Translation = tr;
+        if (e.TryGetComponent<Rotation>(out var ro)) { c.HasRotation = true; c.Rotation = ro; }
+        if (e.TryGetComponent<TilePosition>(out var tp)) { c.HasTilePos = true; c.TilePos = tp; }
+        if (e.TryGetComponent<TileBounds>(out var tb)) { c.HasTileBounds = true; c.TileBounds = tb; }
+        if (e.TryGetComponent<StaticTransformCompatible>(out var st)) { c.HasStatic = true; c.Static = st; }
+        if (e.TryGetComponent<Team>(out var tm)) { c.HasTeam = true; c.Team = tm; }
+        if (e.TryGetComponent<TeamReference>(out var trf)) { c.HasTeamRef = true; c.TeamRef = trf; }
+        if (e.TryGetComponent<UserOwner>(out var uo)) { c.HasOwner = true; c.Owner = uo; }
+        if (e.TryGetComponent<CastleHeartConnection>(out var hc)) { c.HasHeart = true; c.Heart = hc; }
+        if (Core.ServerGameManager.TryGetBuffer<CastleBuildingAttachToParentsBuffer>(e, out var ap))
+            for (int i = 0; i < ap.Length; i++)
+            {
+                Entity pe = ap[i].ParentEntity.GetEntityOnServer();
+                if (pe.Exists()) c.AttachParents.Add(pe);
+            }
+        return c;
+    }
+
+    /// <summary>Instantiate a fresh entity from the captured piece and restore its placement/ownership.</summary>
+    static Entity SpawnPiece(PieceCapture c)
+    {
+        if (!Core.PrefabCollectionSystem._PrefabLookupMap.TryGetValue(c.Prefab, out Entity prefab) || !prefab.Exists())
+        {
+            Core.Log.LogError($"[Uriel STAIRRESPAWN] no prefab for {c.Prefab.GetPrefabName()}({c.Prefab._Value}) — piece skipped.");
+            return Entity.Null;
+        }
+        Entity e = Core.EntityManager.Instantiate(prefab);
+        if (e.Has<Disabled>()) Core.EntityManager.RemoveComponent<Disabled>(e);
+        e.With((ref Translation t) => t = c.Translation);
+        if (c.HasRotation && e.Has<Rotation>()) e.With((ref Rotation r) => r = c.Rotation);
+        if (c.HasTilePos && e.Has<TilePosition>()) e.With((ref TilePosition t) => t = c.TilePos);
+        if (c.HasTileBounds && e.Has<TileBounds>()) e.With((ref TileBounds t) => t = c.TileBounds);
+        if (c.HasStatic && e.Has<StaticTransformCompatible>()) e.With((ref StaticTransformCompatible s) => s = c.Static);
+        if (c.HasTeam && e.Has<Team>()) e.With((ref Team t) => t = c.Team);
+        if (c.HasTeamRef && e.Has<TeamReference>()) e.With((ref TeamReference t) => t = c.TeamRef);
+        if (c.HasOwner && e.Has<UserOwner>()) e.With((ref UserOwner u) => u = c.Owner);
+        if (c.HasHeart && e.Has<CastleHeartConnection>()) e.With((ref CastleHeartConnection h) => h = c.Heart);
+        return e;
+    }
+
+    /// <summary>
+    /// EXPERIMENTAL respawn swap. The identity swap can't refresh the live visual
+    /// (the client binds a placed stair's look to its NetworkId at first receipt and
+    /// never re-derives it — only a restart, which gives every entity a NEW NetworkId,
+    /// refreshes it). So this DESTROYS the whole fused structure and SPAWNS a brand-new
+    /// one of the target style (new NetworkIds = what a restart does for one staircase),
+    /// with a configurable gap so clients register the removal first.
+    /// </summary>
+    public bool SwapViaRespawn(Entity character, Entity userEntity, string styleKey, out string message, bool nearestToPlayer = false)
+    {
+        var root = ResolveTargetStair(character, out string archetype, out string currentStyle, out message, nearestToPlayer);
+        if (root == Entity.Null) return false;
+        if (!PublicStorageService.CharacterControlsContainer(character, root))
+        {
+            message = "You don't control this stair (its castle isn't yours/your clan's).";
+            return false;
+        }
+
+        string targetStyle;
+        if (string.Equals(styleKey, "next", StringComparison.OrdinalIgnoreCase))
+        {
+            targetStyle = NextOwnedStyle(userEntity, archetype, currentStyle);
+            if (targetStyle is null) { message = "No other style available to you for this stair."; return false; }
+        }
+        else
+        {
+            targetStyle = styleKey?.Trim().ToLowerInvariant();
+            if (targetStyle is null || !Matrix[archetype].ContainsKey(targetStyle))
+            {
+                message = $"Unknown style '{styleKey}'. Styles: {string.Join(", ", StyleOrder)} (or 'next').";
+                return false;
+            }
+        }
+        if (string.Equals(targetStyle, currentStyle, StringComparison.OrdinalIgnoreCase))
+        {
+            message = $"That stair is already style '{currentStyle}'.";
+            return false;
+        }
+
+        var targetGuid = new PrefabGUID(Matrix[archetype][targetStyle]);
+        if (!UserOwnsStyle(userEntity, targetGuid, out string dlcName))
+        {
+            message = dlcName is null
+                ? "That style could not be resolved."
+                : $"Style '{targetStyle}' requires the {dlcName} DLC — it isn't in your build menu.";
+            return false;
+        }
+
+        try
+        {
+            return ExecuteRespawn(root, targetGuid, currentStyle, targetStyle, out message);
+        }
+        catch (Exception ex)
+        {
+            Core.Log.LogError($"[Uriel STAIRRESPAWN] failed: {ex}");
+            message = "Respawn failed unexpectedly — check the server log.";
+            return false;
+        }
+    }
+
+    bool ExecuteRespawn(Entity oldRoot, PrefabGUID targetGuid, string fromStyle, string toStyle, out string message)
+    {
+        // 1. Capture the whole fused structure BEFORE destroying anything. The root
+        //    is re-created from the TARGET style prefab; children keep their own
+        //    (style-agnostic) prefabs.
+        var rootCap = Capture(oldRoot, targetGuid);
+        var childCaps = new List<PieceCapture>();
+        var oldPieces = new List<Entity> { oldRoot };
+        if (Core.ServerGameManager.TryGetBuffer<CastleBuildingFusedChildrenBuffer>(oldRoot, out var fch))
+            for (int i = 0; i < fch.Length; i++)
+            {
+                Entity ce = fch[i].ChildEntity.GetEntityOnServer();
+                if (ce.Exists()) { childCaps.Add(Capture(ce, default)); oldPieces.Add(ce); }
+            }
+
+        // 1b. SAFETY: confirm EVERY prefab we'll re-spawn resolves BEFORE destroying
+        //     anything — a missing prefab must never leave the player with a deleted
+        //     staircase.
+        if (!Core.PrefabCollectionSystem._PrefabLookupMap.TryGetValue(rootCap.Prefab, out _))
+        {
+            message = $"Could not resolve the '{toStyle}' staircase prefab — nothing was changed.";
+            return false;
+        }
+        foreach (var cc in childCaps)
+            if (!Core.PrefabCollectionSystem._PrefabLookupMap.TryGetValue(cc.Prefab, out _))
+            {
+                message = "Could not resolve a stair segment prefab — nothing was changed.";
+                return false;
+            }
+
+        // 2. Destroy the old structure (root + children) — each via DestroyUtility so the
+        //    tile grid deregisters cleanly (no ghost claims). Do NOT walk attach-parents
+        //    (that would take out the floors the stair connects to).
+        int destroyed = 0;
+        foreach (Entity p in oldPieces)
+            if (p.Exists()) { DestroyUtility.Destroy(Core.EntityManager, p); destroyed++; }
+        Core.Log.LogInfo($"[Uriel STAIRRESPAWN] {fromStyle}->{toStyle}: destroyed {destroyed} old piece(s) (root + {childCaps.Count} children). Respawning after gap.");
+
+        // 3. After a gap (so clients register the removal first), spawn the new structure.
+        int gap = System.Math.Max(1, Settings.StairSwap_RespawnGapFrames.Value);
+        Tick.RunLater(gap, () =>
+        {
+            try
+            {
+                Entity newRoot = SpawnPiece(rootCap);
+                if (newRoot == Entity.Null) { Core.Log.LogError("[Uriel STAIRRESPAWN] new root spawn failed — staircase NOT restored."); return; }
+
+                var newChildren = new List<Entity>();
+                foreach (var cc in childCaps)
+                {
+                    Entity nc = SpawnPiece(cc);
+                    if (nc == Entity.Null) continue;
+                    if (nc.Has<CastleBuildingFusedChild>())
+                        nc.With((ref CastleBuildingFusedChild f) => f.ParentEntity = newRoot);
+                    // Re-attach to the same parent tiles (floors/walls) the old child held.
+                    if (cc.AttachParents.Count > 0
+                        && Core.ServerGameManager.TryGetBuffer<CastleBuildingAttachToParentsBuffer>(nc, out var apb))
+                    {
+                        apb.Clear();
+                        foreach (Entity pe in cc.AttachParents)
+                        {
+                            if (!pe.Exists()) continue;
+                            apb.Add(new CastleBuildingAttachToParentsBuffer { ParentEntity = pe });
+                            if (Core.ServerGameManager.TryGetBuffer<CastleBuildingAttachedChildrenBuffer>(pe, out var acb))
+                                acb.Add(new CastleBuildingAttachedChildrenBuffer { ChildEntity = nc });
+                        }
+                    }
+                    newChildren.Add(nc);
+                }
+
+                if (Core.ServerGameManager.TryGetBuffer<CastleBuildingFusedChildrenBuffer>(newRoot, out var ncb))
+                {
+                    ncb.Clear();
+                    foreach (Entity nc in newChildren)
+                        ncb.Add(new CastleBuildingFusedChildrenBuffer { ChildEntity = nc });
+                }
+
+                Core.Log.LogInfo($"[Uriel STAIRRESPAWN] respawned {targetGuid.GetPrefabName()} root({newRoot.Index}:{newRoot.Version}) + {newChildren.Count} child(ren). New NetworkIds assign next tick.");
+            }
+            catch (Exception ex)
+            {
+                Core.Log.LogError($"[Uriel STAIRRESPAWN] respawn lambda failed: {ex}");
+            }
+        });
+
+        message = $"Stair RESPAWN {fromStyle} -> {toStyle}: old staircase destroyed; new-style staircase appears after a {gap}-frame gap (it should render the NEW style live since it's a fresh entity). EXPERIMENTAL — if it looks wrong or floats, dismantle & rebuild, or restart to normalize.";
+        return true;
+    }
+
+    /// <summary>
+    /// Cleanly remove the aimed staircase: destroy the whole fused structure (root +
+    /// all fused TM_ children) via DestroyUtility so the tile grid deregisters
+    /// properly, WITHOUT walking attach-parents — so the floors/walls/rooms the stair
+    /// connects to are left untouched. This is the destroy step of the respawn swap,
+    /// on its own (vanilla dismantle drags connected pieces; this targets only the stair).
+    /// </summary>
+    public bool RemoveStair(Entity character, out string message, bool nearestToPlayer = false)
+    {
+        var root = ResolveTargetStair(character, out string archetype, out string currentStyle, out message, nearestToPlayer);
+        if (root == Entity.Null) return false;
+        if (!PublicStorageService.CharacterControlsContainer(character, root))
+        {
+            message = "You don't control this stair (its castle isn't yours/your clan's).";
+            return false;
+        }
+
+        var pieces = new List<Entity> { root };
+        if (Core.ServerGameManager.TryGetBuffer<CastleBuildingFusedChildrenBuffer>(root, out var fch))
+            for (int i = 0; i < fch.Length; i++)
+            {
+                Entity ce = fch[i].ChildEntity.GetEntityOnServer();
+                if (ce.Exists()) pieces.Add(ce);
+            }
+
+        int destroyed = 0;
+        foreach (Entity p in pieces)
+            if (p.Exists()) { DestroyUtility.Destroy(Core.EntityManager, p); destroyed++; }
+
+        Core.Log.LogInfo($"[Uriel STAIRS] removestairs: destroyed {destroyed} piece(s) of a {archetype} '{currentStyle}' staircase (connected tiles untouched).");
+        message = $"Removed the {archetype} staircase ({destroyed} piece(s)). The floors/walls it was connected to were left intact. (No materials are refunded.)";
+        return true;
     }
 
     // ---------------------------------------------------------------- info

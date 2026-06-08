@@ -1,29 +1,93 @@
 # Feature: Stair Hot-Swap
 
-**Status:** WORKING v0.13.x (2026-06-07) — identity swap, validated live;
-visuals appear at the next server restart (engine bake limitation, see below)
+**Status:** WORKING v0.14.x (2026-06-07) — **destroy + respawn, applies LIVE**
+(no restart). Validated on straight, curved, and wide shapes. `.uriel stairswap`
+is player-facing.
 
-## Final mechanism (v0.13.x): IDENTITY SWAP — and the MegaStatic bake reality
+## Final mechanism (v0.14.x): DESTROY + RESPAWN (live)
 
-The owner's insight ended the destroy/rebuild saga: same-archetype cosmetics
-are component-identical and all TM_ segments are style-agnostic, so the swap
-**rewrites the placed root's identity in place** — `PrefabGUID`,
-`BlueprintData.Guid`, and `NetworkId.MegaStatic_PrefabGUID` (placed tiles are
-MegaStatic-networked; the visual id is embedded in the network identity).
-Nothing is destroyed or placed; the stair stays the original vanilla-built
-object. **Validated live: a server restart renders the swapped style.**
+`SwapViaRespawn` / `ExecuteRespawn` in `Services/StairSwapService.cs`. A placed
+staircase is a fused structure: one `BP_Castle_Stairs_<archetype>_<style>` root
++ N `TM_Castle_Stairs_*` fused-child segments (the rendered geometry). The swap:
 
-**Why visuals wait for a restart (researched, definitive):** placed tiles are
-baked into per-chunk **MegaStatic snapshots** (`MegaStaticManager` with
-instance/prefab/destroyed buffers) generated ONCE at server load
-(`LoadPersistenceSystemV2.ReinstantiateMegaStatics`). Clients download the
-bake at connect; the only live replication is the destroyed-instance list
-(dismantles). There is no modified-instance channel and no rebake API —
-neither relog nor proximity refresh can show a changed visual mid-session.
-Possible future live paths (descending practicality): BCH client-side
-re-render (see the BCH handoff §4.7 — the realistic one); manager-buffer
-surgery (append old instance to `MegaStaticDestroyedBuffer` + convert the
-entity to Normal networking — deep, risky, parked).
+1. **Capture** the whole structure before touching it — per piece: `Translation`,
+   `Rotation`, `TilePosition`, `TileBounds`, `StaticTransformCompatible`,
+   `Team`/`TeamReference`/`UserOwner`/`CastleHeartConnection`, and each child's
+   `CastleBuildingAttachToParentsBuffer` (the floors/walls it connects to). The
+   root is captured with the **target style** prefab; children keep their own
+   (style-agnostic) prefabs, so shape is preserved exactly.
+2. **Safety gate:** confirm every prefab resolves BEFORE destroying anything — a
+   missing prefab can never leave a player with a deleted staircase.
+3. **Destroy** every piece (root + children) via `DestroyUtility.Destroy` (clean
+   tile-grid deregister; no ghost claims). It does NOT walk attach-parents (that
+   would delete the floors the stair rests on).
+4. After **`[StairSwap] RespawnGapFrames`** (default 5) — so clients register the
+   removal first — **re-Instantiate** the root from the target-style prefab and
+   each child from its own prefab, restore the captured placement/ownership,
+   re-wire the fused parent/children, and re-attach to the same floors.
+
+The new pieces get **fresh NetworkIds**, so connected clients build them from
+scratch and render the new style **live** — which is exactly what a server
+restart does, but for one staircase.
+
+### Why the in-place identity swap (v0.13.x) couldn't do this — corrected
+
+The v0.13.x theory ("placed tiles are MegaStatic; visual baked at load; only a
+restart refreshes") was **wrong**, proven by live `.uriel stairrefresh` dumps:
+placed stairs are ordinary `NetworkId.Type=Normal` entities, not MegaStatic.
+The real constraint: the client binds a placed stair's rendered look to the
+entity at FIRST receipt of its `NetworkId` and never re-derives it from any
+server-side data change — relog, area-reload, re-stream blink, and re-baking
+`TileData`/`NetworkedPrefabChildren` blobs were all tested and did nothing. Only
+a genuinely NEW entity (new NetworkId) refreshes it. Hence destroy + respawn.
+(`Instantiate(BP_root)` alone is insufficient — the fused children spawn via
+`SubScenePrefabSpawnerSystem` on the load path, so we spawn + wire them by hand.)
+
+**Trade-off:** the swap is now destructive and the stair becomes a NEW entity
+(BCH must not cache stair entity ids across a swap). Known v1 simplification:
+the attachment/decay/pathing graph is restored minimally — refine if stairs
+float, decay, or mis-path. The legacy non-destructive identity swap
+(`Swap`/`ExecuteSwap`) remains in the file, unwired, as a fallback reference.
+
+### ⚠️ Correction (live test 2026-06-07): stairs are NOT MegaStatic
+
+A live `.uriel stairrefresh` dump **disproved the MegaStatic-bake theory above**
+(it was inferred from a decompile pass + the old v0.13.x code comments; treat
+the "MegaStatic snapshot / bake-at-load" paragraphs in this doc as historical).
+Runtime truth:
+
+- A placed staircase is a **fused multi-entity structure**: one
+  `BP_Castle_Stairs_*` root (carries the style identity; has **no
+  Translation/mesh**, so it does not render itself) + **4 fused
+  `TM_Castle_Stairs_Single_*` child segments** that carry the rendered geometry,
+  physics, and `StaticTransformCompatible`. **The children render.**
+- **Every piece is `NetworkId.Type=Normal`, not MegaStatic** (`megaStaticTiles=0`).
+  So Normal entities are live-replicated and the MegaStatic/`MegaStaticDestroyedBuffer`
+  surgery path is a **dead end** for stairs. (With `Type=Normal`, the
+  `NetworkId.MegaStatic_*` fields are meaningless union bytes — ignore them.)
+- The children are **style-agnostic** (identical `TM_` GUIDs across styles) and
+  are unchanged by the swap; only the root's `PrefabGUID`/`BlueprintData` rewrite.
+- So the restart requirement narrows to: **the client derives the staircase
+  cosmetic from the root identity when it FIRST receives the structure, and does
+  not re-derive it when the root's `PrefabGUID` changes in place.**
+
+### Experimental live-refresh probe (v0.14.0-exp, admin only)
+
+`.uriel stairrefresh` (adminOnly), gated by `[StairSwap] ExperimentalLiveRefresh`:
+
+- **Flag off (default):** dumps the full runtime component set of the root and
+  every fused child (`EntityManager.Debug.GetEntityInfo`) to the server log, plus
+  each piece's NetworkId type. Zero mutation. Purpose: find whatever component
+  carries the cosmetic so we can rewrite it if needed.
+- **Flag on:** additionally **re-streams** the whole structure (root + children)
+  through the game's Disabled→enabled streaming path (`ForceResync`, the same
+  mechanism public-storage uses) so clients drop and re-receive every piece. If
+  the client re-derives the cosmetic from the (already-rewritten) root on
+  re-receive, the new style appears live.
+
+Never touches the durable swap; restart-safe. If re-stream doesn't refresh the
+look, the next step is to target the style-bearing component identified in the
+component dump, or fall back to BCH client-side re-render (handoff §4.7).
 
 ## Mechanism revision (v0.12.0) — Route B failed live; Route A (vanilla events) is the answer
 
@@ -145,13 +209,20 @@ entitlement checking may be possible (the platform logs per-user
 `UserContentFlags`) — investigate `User`/platform components during
 implementation; if readable, add `RequireDlcOwnership` mode.
 
-## Command UX (proposed)
+## Command UX
 
 ```
-.uriel stairswap <style>     style ∈ stone1 | stone2 | stone3 | gloomrot | projectk | strongblade
+.uriel stairswap <style>     restyle the aimed stair LIVE (destroy+respawn).
+                             style ∈ stone1 | stone2 | stone3 | gloomrot | projectk | strongblade
 .uriel stairswap next        cycle to the next style in the same archetype
+.uriel removestairs          cleanly delete the aimed staircase (whole fused structure)
+                             WITHOUT disturbing connected floors/walls. Ownership-gated.
 .uriel stairstyles           list styles + which one the aimed stair has
 ```
+
+All accept a trailing `nearest` token (BCH UI relays). `.uriel stairswap` and
+`.uriel removestairs` are player-facing (ownership-gated); `.uriel stairpurge`
+(radius ghost-cleanup) remains admin-only.
 
 Aim at any part of the staircase; archetype is auto-detected from the root's
 prefab name; the swap preserves position, rotation, and ownership exactly.

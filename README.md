@@ -7,19 +7,105 @@ fixes, each individually toggleable by server admins.
 > This is the **GitHub / developer** page. The player-facing mod page (what
 > ships to Thunderstore) lives at [`Uriel/Uriel/README.md`](Uriel/Uriel/README.md).
 
-**Status: pre-release.** Not yet published to Thunderstore.
+## ⚠ Status: pre-1.0, in active development
+
+Uriel is **pre-release** and not yet published to Thunderstore. The features
+below are implemented and have been tested on a live server, but this is a
+**server-side mod under active development** — if you run it, you're helping test
+it, and **you take that risk on yourself.** Back up your server save before
+installing any mod. Commands, config keys, and behavior may change before 1.0.
+
+**Bug reports & feedback:** the **[The Shadow Realm Discord](https://discord.gg/usC9QgBrXK)**
+is the primary channel (fastest path to a fix in the next release); written-up
+GitHub issues are welcome too.
 
 ## Features
 
+Two feature groups are live today, with more sub-mods planned under the umbrella.
+Every feature ships behind its own config switch — Uriel is never all-or-nothing.
+
 | Feature | Status | Design doc |
 |---|---|---|
-| **Public storage** — per-container opt-in: mark a specific chest publicly accessible, with optional permissions (take/give), per-player withdrawal limits, per-stack access costs paid to the owner, and `nearest` targeting for UI relays | Implemented; open+take validated live; v0.9.0 rebuild-on-share mechanism + policies pending validation | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
-| **Public prison cells** — separately mark a prison cell publicly accessible: feed/extract via the native UI, prisoner takeover via `.uriel takeprisoner` (the native subdue button is client-gated to the cell's clan — confirmed unreachable server-side) | Implemented; feed/extract validated live; takeprisoner pending validation | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
-| **Stair hot-swap** — restyle placed stairs in place (same-shape cosmetics only, per-user DLC ownership gating) | Implemented; swap validated live; v0.9.0 editability fix pending validation | [docs/features/STAIR_HOTSWAP.md](docs/features/STAIR_HOTSWAP.md) |
-| **BloodCraftHub integration** — client-side companion UI (share panels, prisoner-take button, stair picker) | Contract authored; BCH-side work pending | [Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md](Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md) |
+| **Public storage** — per-container opt-in: mark a specific chest publicly accessible, with optional permissions (take/give), per-player withdrawal limits, per-stack access costs paid to the owner, and `nearest` targeting for UI relays | Implemented; open+take validated live; rebuild-on-share mechanism + policies pending broader validation | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
+| **Public prison cells** — separately mark a prison cell publicly accessible: feed/extract via the native UI, prisoner takeover via `.uriel takeprisoner` (the native subdue button is client-gated to the cell's clan — confirmed unreachable server-side) | Implemented; feed/extract validated live; takeprisoner pending broader validation | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
+| **Stair editing** — restyle placed stairs **live** (destroy+respawn; same-shape cosmetics only, per-user DLC gating), plus `.uriel removestairs` to cleanly delete a staircase without disturbing connected floors/walls | Implemented; live restyle validated locally on straight/curved/wide shapes; broader testing pending | [docs/features/STAIR_HOTSWAP.md](docs/features/STAIR_HOTSWAP.md) |
+| **BloodCraftHub integration** *(optional companion — not a dependency)* — client-side UI that can drive Uriel's features (share panels, prisoner-take button, stair picker); every feature also works via chat commands | Contract authored; BCH-side work pending | [Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md](Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md) |
 
-Every feature ships behind its own config switch — Uriel is never
-all-or-nothing.
+> **Note for players accessing a share:** when a chest or cell is first made
+> public, a player trying to use it may need to **log out and back in once**
+> before their client recognizes it as accessible.
+
+## Commands
+
+Chat commands prefixed with `.uriel` (VCF). Type `.uriel` for an overview or
+`.help uriel` for the full generated list. Most targeted commands accept a
+trailing **`nearest`** token to act on the closest object instead of where
+you're aiming (for UI relays / when a menu has your aim ray pointing away).
+
+<details>
+<summary><b>🗄 Public Storage &amp; Prison commands</b></summary>
+
+**Players** (aim at a container you own):
+
+| Command | What it does |
+|---|---|
+| `.uriel share [modifiers…]` | Make the aimed container public. Modifiers **stack in any order**: `permission take\|give\|givetake`, `limithours <h>`, `limitwithdrawal <stacks>`, `cost <itemId> <amount>` |
+| `.uriel unshare` | Make the aimed container private again |
+| `.uriel info` | Show a container's sharing rules (anyone) |
+| `.uriel shared` | List every container **you** have made public |
+| `.uriel unsharemine` | Revert **all** of your shares in one command |
+| `.uriel paychest` | Designate the aimed **private** chest to receive access-cost payments |
+| `.uriel finditem <name>` | Search item ids by name (for the `cost` modifier) |
+| `.uriel takeprisoner` | Take the prisoner from a **shared** cell — subdued and released to you |
+
+<details>
+<summary><i>Admin sub-commands</i></summary>
+
+| Command | What it does |
+|---|---|
+| `.uriel sharedall [name\|steamId]` | List all public containers, or just one player's |
+| `.uriel unshareplayer <name\|steamId>` | Revert all of one player's shares |
+| `.uriel unshareall` | Revert every public container to private; clear the registry |
+| `.uriel sharedebug` | Dump the aimed container's live sharing state (diagnostics) |
+
+Admins may also aim at **any** container and use `.uriel share […]` / `.uriel unshare` to override directly.
+</details>
+</details>
+
+<details>
+<summary><b>🪜 Stair Editing commands</b></summary>
+
+**Players** (aim at a staircase you own):
+
+| Command | What it does |
+|---|---|
+| `.uriel stairswap <style\|next>` | Restyle the aimed staircase **live**. Styles: `stone1`, `stone2`, `stone3`, `gloomrot`*, `projectk`*, `strongblade`* (`*` = DLC). `next` cycles to the next style you own. |
+| `.uriel removestairs` | Cleanly delete the aimed staircase, leaving connected floors/walls intact |
+| `.uriel stairstyles` | Show the aimed stair's shape, current style, and the styles you can use |
+
+<details>
+<summary><i>Admin sub-commands</i></summary>
+
+| Command | What it does |
+|---|---|
+| `.uriel stairpurge` | Destroy stray "ghost" stair entities within 5m (cleanup for older builds) |
+</details>
+</details>
+
+## Configuration
+
+`BepInEx/config/kdpen.Uriel.cfg` — every feature has its own `Enabled` switch
+(changes take effect on server restart).
+
+| Section | Key | Default | Effect |
+|---|---|---|---|
+| PublicStorage | Enabled | `true` | Master switch for chest sharing |
+| PublicStorage | PrisonEnabled | `true` | Independently allow prison-cell sharing |
+| PublicStorage | MaxTargetDistance | `5` | Aim distance for `.uriel share` / `unshare` |
+| StairSwap | Enabled | `true` | Allow live stair restyling + `.uriel removestairs` |
+| StairSwap | MaxTargetDistance | `6` | Aim distance for the stair commands |
+| StairSwap | RespawnGapFrames | `5` | Frames between destroy & respawn when restyling a stair |
+| Diagnostics | VerboseLogging | `false` | Extra per-action log lines (useful when testing) |
 
 ## Architecture
 
@@ -28,8 +114,6 @@ all-or-nothing.
 - Commands via [VampireCommandFramework](https://thunderstore.io/c/v-rising/p/deca/VampireCommandFramework/).
 - Deferred initialization (`Core.TryInitialize`) — no game-type statics before
   the server world + prefab data exist.
-- Sibling project of [Beelzebub, Lord of Gluttony](https://github.com/KDavidP1987/Beelzebub-Lord-of-Gluttony)
-  (same author, same architecture).
 
 ## Building
 
@@ -44,9 +128,53 @@ default Steam path if present (override with `-p:VRisingServerPath=...`; point
 it at a non-existent path to skip deployment). Stop the server before
 redeploying — it file-locks the DLL.
 
+## Roadmap
+
+Uriel is an umbrella mod — the plan is to keep adding small, independently
+toggleable server-side sub-mods. Full list (incl. large-scope/exploratory ideas)
+in **[`docs/ROADMAP.md`](docs/ROADMAP.md)**. Highlights:
+
+**Near-term sub-mods:**
+- **Coffin sharing** — share coffin use, with an optional cost-to-use modifier.
+- **Conditional door access** — share a door behind payment and/or allowed time
+  windows.
+- **Bulk storage sharing** — open all heart-linked storage at a location at once,
+  auto-excluding the pay chest and any chests marked private.
+
+**Platform / integration:**
+- **BloodCraftHub integration** — client-side companion UI (share panels,
+  prisoner-take button, stair-style picker) against Uriel's command surface.
+- **Machine-readable `[URIEL:*]` API** — structured replies for companion UIs
+  (see the [BCH handoff](Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md) §6).
+- **Stair editing polish** — broader testing of attachment/decay/pathing edge
+  cases on the live-rebuild path.
+
+**Exploring (large-scope):** plot expansion (phase-gate instances or map
+copy/paste), PvP-arena V Blood boss mode with prize tables, paid area-gating for
+mazes, scheduled/paid door & teleport controls, expanded castle decor assets,
+triggered NPC spawns, and basement levels. See
+[`docs/ROADMAP.md`](docs/ROADMAP.md) for details.
+
+## Acknowledgements
+
+- **[VampireCommandFramework](https://thunderstore.io/c/v-rising/p/deca/VampireCommandFramework/) — by deca** — the command framework (hard dependency).
+- **[BepInEx](https://thunderstore.io/c/v-rising/p/BepInEx/BepInExPack_V_Rising/)** — the loader that makes V Rising modding possible.
+- **[KindredCommands & KindredSchematics](https://thunderstore.io/c/v-rising/p/odjit/) — by odjit** — open-source castle/tile techniques referenced for the live stair rebuild.
+- **[Bloodcraft](https://thunderstore.io/c/v-rising/p/zfolmt/Bloodcraft/) — by zfolmt** — reference for server-side ECS/Harmony patterns.
+
+## Feedback & community
+
+Built and tested on the V Rising server **The Shadow Realm** (Brutal PvE),
+maintained by Chaos. Pre-1.0 testers shape what 1.0 becomes — feedback is hugely
+valued.
+
+- **The Shadow Realm Discord (primary):** https://discord.gg/usC9QgBrXK
+- Support development: [PayPal](https://www.paypal.com/paypalme/KrisPenland) · [SkillEra.IO](https://SkillEra.IO)
+
 ## Repository docs
 
 - [`CLAUDE.md`](CLAUDE.md) — working agreements & architecture guide
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — shipped / planned / exploratory feature roadmap
 - [`docs/PREFLIGHT.md`](docs/PREFLIGHT.md) — session-start checklist
 - [`docs/DEV_REMINDERS.md`](docs/DEV_REMINDERS.md) — IL2CPP/ECS gotchas & process rules
 - [`Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md`](Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md) — the BloodCraftHub living contract

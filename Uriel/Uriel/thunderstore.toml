@@ -4,7 +4,7 @@ schemaVersion = "0.0.1"
 [package]
 namespace = "kdpen"
 name = "Uriel"
-versionNumber = "0.13.2"
+versionNumber = "0.14.0"
 description = "A host of server-side QoL enhancements & fixes: hot-swap stairs without demolishing, share specific chests or prison cells publicly, and more to come. Each feature admin-toggleable. Server-side only."
 websiteUrl = "https://github.com/KDavidP1987/Uriel-Lord-of-Hosts"
 containsNsfwContent = false

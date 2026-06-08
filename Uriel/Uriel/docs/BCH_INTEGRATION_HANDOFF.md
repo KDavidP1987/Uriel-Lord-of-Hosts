@@ -79,7 +79,8 @@ Disabled-blink). Boot re-applies shared state before clients join.
 .uriel paychest                   designate aimed PRIVATE general chest for cost payments
 .uriel finditem <name>            item-name → numeric id search (≤8 results)
 .uriel takeprisoner               take the prisoner from the aimed SHARED cell (subdued, follows taker)
-.uriel stairswap <style|next>     restyle aimed stair (stone1|stone2|stone3|gloomrot|projectk|strongblade)
+.uriel stairswap <style|next>     restyle aimed stair LIVE (stone1|stone2|stone3|gloomrot|projectk|strongblade) — rebuilds as a NEW entity
+.uriel removestairs               cleanly delete the aimed staircase (leaves connected floors/walls intact)
 .uriel stairstyles                aimed stair's shape + current style + owned styles
 ```
 
@@ -143,20 +144,18 @@ for the `[URIEL:*]` API before building heavy parsers):**
    `AB_Charm_Active_Human_Buff` (GUID 1303169868) owned by the taker — BCH
    could show the remaining charm duration so they get the prisoner home in
    time.
-7. **⛔→BCH: live stair-swap visuals.** Uriel's stair swap rewrites the placed
-   root's identity (`PrefabGUID` + `BlueprintData.Guid` +
-   `NetworkId.MegaStatic_PrefabGUID`) — durable and correct — but placed
-   tiles render from per-chunk **MegaStatic bakes generated once at server
-   load** (`MegaStaticManager` + instance/prefab buffers; only a
-   destroyed-list replicates live). So the new look appears at the next
-   server RESTART; no server-side refresh channel exists. **BCH, being
-   client-side, can close this gap**: detect a mismatch between a stair
-   entity's replicated `PrefabGUID` and the locally rendered baked model
-   (or watch for the swap's chat reply) and re-render/instantiate the
-   correct client-side visual immediately. Detection recipe: entity has
-   `CastleBuildingFusedRoot` + prefab name `BP_Castle_Stairs_*`; compare
-   against the client's `MegaStaticInstanceBuffer`/`MegaStaticPrefabBuffer`
-   entry for that `NetworkId.MegaStatic_StaticTransformIndex`.
+7. **✅ live stair-swap visuals — SOLVED server-side (v0.14.x); no BCH
+   re-render needed.** Earlier this doc asked BCH to re-render swapped stairs
+   because the in-place identity swap only showed the new look after a server
+   restart. That is **obsolete**: the prior "MegaStatic bake" diagnosis was
+   wrong (placed stairs are ordinary `NetworkId.Type=Normal` entities), and
+   `.uriel stairswap` now **destroys the fused staircase and respawns it in the
+   new style** with fresh NetworkIds, so it renders **live** with no client
+   help. **The one thing BCH MUST respect: a stair swap now produces a NEW
+   entity** (new id for the root and every fused child). BCH must NOT cache a
+   stair entity id across a swap — re-resolve by aim/position after any
+   `stairswap`. Stair-root detection is unchanged: `CastleBuildingFusedRoot` +
+   prefab name `BP_Castle_Stairs_*`.
 
 ## 5. Feature state & caveats BCH must respect
 
@@ -168,7 +167,7 @@ for the `[URIEL:*]` API before building heavy parsers):**
 | Prison share (feed/extract) | ✅ validated live | inventory surfaces appear natively once shared |
 | Prison subdue via UI | ⛔ client-gated | **BCH button → `.uriel takeprisoner`** (§4.1) |
 | `.uriel takeprisoner` | 🔬 v0.10.0, two-layer (vanilla event → manual charm) | untested live; log says which layer fired |
-| Stair swap | 🔬 v0.9.0 transform fix pending validation | swapped stair = NEW entity; pre-v0.9.0 stuck stairs repaired by re-swapping |
+| Stair swap | ✅ v0.14.x destroy+respawn, applies LIVE (validated straight/curved/wide) | swapped stair = NEW entity (root + all fused children) — re-resolve by position after a swap; never cache stair ids |
 | Config kill-switches | ✅ | `PublicStorage.Enabled`, `PublicStorage.PrisonEnabled`, `StairSwap.Enabled` — commands reply "disabled by the server admin"; BCH should hide UI on that reply |
 
 ## 6. 📋 Planned machine wire API (implement in Uriel BEFORE BCH parses)

@@ -8,6 +8,54 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.14.0] - 2026-06-07
+
+### Changed — stair swap now applies LIVE (destroy + respawn)
+- Stair restyling is no longer an in-place identity rewrite (which only showed
+  the new look after a server restart). `.uriel stairswap` now **destroys the
+  fused staircase and respawns it in the target style as a fresh entity**, so
+  the new style renders immediately for everyone — no restart, no relog.
+  Validated live on straight, curved, and wide staircases.
+- **Why the change (the v0.13.x theory was wrong):** deep live investigation
+  (decompile + runtime `.uriel stairrefresh` dumps) proved placed stairs are
+  ordinary `NetworkId.Type=Normal` entities, NOT MegaStatic. The real
+  constraint: the client binds a placed stair's rendered look to its `NetworkId`
+  at first receipt and never re-derives it from any server-side data change —
+  relog, full area unload/reload, the Disabled re-stream blink, and re-baking
+  `TileData`/`NetworkedPrefabChildren` blobs were **all tested and did nothing**.
+  Only a genuinely NEW entity (new NetworkId) refreshes it, which is exactly what
+  a restart does — now reproduced for a single staircase.
+- **Mechanism:** capture the whole structure (root + fused children: transforms,
+  `TilePosition`/`TileBounds`, `StaticTransformCompatible`, `Team`/`TeamReference`/
+  `UserOwner`/`CastleHeartConnection`, and each child's
+  `CastleBuildingAttachToParentsBuffer`) → verify every prefab resolves BEFORE
+  destroying anything (safety: a missing prefab can never delete a stair) →
+  `DestroyUtility.Destroy` each piece (clean tile-grid deregister; NO parent-walk,
+  so connected floors/walls survive) → after a configurable gap, re-`Instantiate`
+  root (target style) + children (own prefabs) and re-wire fused/heart/team/
+  attachments. `Instantiate(BP_root)` alone is insufficient — fused children
+  spawn via `SubScenePrefabSpawnerSystem` on the load path, so they're spawned +
+  wired by hand.
+- `.uriel stairswap` is now **player-facing** (was effectively admin-only during
+  the experiment). Same-shape restriction and per-user DLC gating unchanged.
+- New config `[StairSwap] RespawnGapFrames` (default 5) — frames between destroy
+  and respawn so clients register the removal first.
+
+### Added — `.uriel removestairs`
+- Cleanly delete the aimed staircase (the whole fused structure) **without**
+  disturbing the floors/walls/rooms it connects to — the clean targeted removal
+  vanilla dismantle can't do. Player-facing, ownership-gated, accepts `nearest`.
+  No material refund in this version.
+
+### Notes
+- A swapped/rebuilt stair is now a **NEW entity** (new ids for root + every
+  child) — BCH must not cache stair entity ids across a swap (handoff §4.7 +
+  feature-state row updated).
+- The legacy in-place identity swap (`Swap`/`ExecuteSwap`) and the
+  `stairrefresh` diagnostic remain in the source, unwired, for reference.
+- Known simplification: the attachment/decay/pathing graph is restored
+  minimally; broader testing pending (local tests clean so far).
+
 ## [0.13.2] - 2026-06-07
 
 ### Changed — honest visuals messaging; restart-refresh question answered

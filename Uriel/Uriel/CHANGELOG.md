@@ -3,6 +3,19 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.14.0 (2026-06-07)
+
+- **Stair swap now applies INSTANTLY — no restart needed!** Restyling a staircase
+  rebuilds it in the new style on the spot, so everyone sees the change live.
+  Works on every stair shape (straight, curved left/right, wide). Now available
+  to all players, not just admins.
+- **New: `.uriel removestairs`** — cleanly delete a staircase you own *without*
+  tearing apart the floors and walls it's attached to (which a normal dismantle
+  would disturb).
+- New config `[StairSwap] RespawnGapFrames` (default 5) to tune the rebuild.
+- Note: a swapped stair is rebuilt as a fresh object — if anything ever looks
+  off, dismantle & rebuild it.
+
 ## 0.13.2 (2026-06-07)
 
 - Stair swap works! The restyle is applied and saved instantly; the new look

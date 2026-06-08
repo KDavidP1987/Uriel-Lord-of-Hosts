@@ -23,12 +23,12 @@ internal static class StairCommands
         return true;
     }
 
-    [Command("stairswap", description: "Swap the aimed stair to another style of the same shape. Usage: .uriel stairswap <stone1|stone2|stone3|gloomrot|projectk|strongblade|next>")]
+    [Command("stairswap", description: "Swap the aimed stair to another style of the same shape — applies LIVE (the stair is rebuilt in the new style; no restart needed). Usage: .uriel stairswap <stone1|stone2|stone3|gloomrot|projectk|strongblade|next>")]
     public static void StairSwap(ChatCommandContext ctx, string style, string mode = null)
     {
         if (!Ready(ctx)) return;
         bool nearest = "nearest".Equals(mode?.Trim(), System.StringComparison.OrdinalIgnoreCase);
-        Core.StairSwap.Swap(ctx.Event.SenderCharacterEntity, ctx.Event.SenderUserEntity, style, out string message, nearest);
+        Core.StairSwap.SwapViaRespawn(ctx.Event.SenderCharacterEntity, ctx.Event.SenderUserEntity, style, out string message, nearest);
         ctx.Reply(message);
     }
 
@@ -39,11 +39,27 @@ internal static class StairCommands
         ctx.Reply(Core.StairSwap.PurgeNear(ctx.Event.SenderCharacterEntity));
     }
 
+    [Command("removestairs", description: "Cleanly remove the aimed staircase (the whole fused structure) WITHOUT disturbing the floors/walls it's connected to. You must own it. Usage: .uriel removestairs [nearest]")]
+    public static void RemoveStairs(ChatCommandContext ctx, string mode = null)
+    {
+        if (!Ready(ctx)) return;
+        bool nearest = "nearest".Equals(mode?.Trim(), System.StringComparison.OrdinalIgnoreCase);
+        Core.StairSwap.RemoveStair(ctx.Event.SenderCharacterEntity, out string message, nearest);
+        ctx.Reply(message);
+    }
+
     [Command("stairstyles", description: "Show the aimed stair's shape, current style, and the styles available to you.")]
     public static void StairStyles(ChatCommandContext ctx, string mode = null)
     {
         if (!Ready(ctx)) return;
         bool nearest = "nearest".Equals(mode?.Trim(), System.StringComparison.OrdinalIgnoreCase);
         ctx.Reply(Core.StairSwap.DescribeStyles(ctx.Event.SenderCharacterEntity, ctx.Event.SenderUserEntity, nearest));
+    }
+
+    [Command("stairrefresh", adminOnly: true, description: "(admin, EXPERIMENTAL) Dump the aimed staircase's mega-static state to the server log; attempts a LIVE visual refresh only if [StairSwap] ExperimentalLiveRefresh is enabled. Does not affect the durable swap.")]
+    public static void StairRefresh(ChatCommandContext ctx)
+    {
+        if (!Core.IsReady) { ctx.Reply("Uriel is not yet initialized."); return; }
+        ctx.Reply(Core.StairSwap.DiagnoseLiveRefresh(ctx.Event.SenderCharacterEntity, Settings.StairSwap_ExperimentalLiveRefresh.Value));
     }
 }

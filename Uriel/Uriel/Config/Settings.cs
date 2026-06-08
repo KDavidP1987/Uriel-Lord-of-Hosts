@@ -12,6 +12,8 @@ internal static class Settings
     // ---- Feature: stair hot-swap ----
     public static ConfigEntry<bool> StairSwap_Enabled { get; private set; }
     public static ConfigEntry<float> StairSwap_MaxTargetDistance { get; private set; }
+    public static ConfigEntry<bool> StairSwap_ExperimentalLiveRefresh { get; private set; }
+    public static ConfigEntry<int> StairSwap_RespawnGapFrames { get; private set; }
 
     // ---- Feature: public storage (per-container opt-in) ----
     public static ConfigEntry<bool> PublicStorage_Enabled { get; private set; }
@@ -33,6 +35,23 @@ internal static class Settings
             "StairSwap", "MaxTargetDistance", 6f,
             "How close (meters) your aim point must be to a stair for '.uriel stairswap'/'.uriel stairstyles' " +
             "to target it.");
+
+        StairSwap_RespawnGapFrames = config.Bind(
+            "StairSwap", "RespawnGapFrames", 5,
+            "EXPERIMENTAL ('.uriel stairrespawn'): frames to wait between destroying the old " +
+            "staircase and spawning the new-style one, so server + clients register the removal " +
+            "before the replacement appears. Higher = longer visible gap but more reliable.");
+
+        StairSwap_ExperimentalLiveRefresh = config.Bind(
+            "StairSwap", "ExperimentalLiveRefresh", false,
+            "EXPERIMENTAL / ADMIN ONLY. When true, '.uriel stairrefresh' will ATTEMPT a live " +
+            "mega-static visual refresh by appending to the per-chunk MegaStaticManager's " +
+            "snapshot-replicated destroyed-instance buffer. The durable identity swap is never " +
+            "affected by this. Leave false unless you are actively testing: a placed staircase " +
+            "renders from a per-chunk static batch baked at load, and dropping an instance with " +
+            "no verified live re-add path can make the staircase render INVISIBLE until the next " +
+            "server restart (which renders it correctly in the swapped style). With the flag off, " +
+            "'.uriel stairrefresh' only dumps diagnostics to the server log and changes nothing.");
 
         PublicStorage_Enabled = config.Bind(
             "PublicStorage", "Enabled", true,
