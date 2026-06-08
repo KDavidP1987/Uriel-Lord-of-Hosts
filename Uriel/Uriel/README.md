@@ -1,5 +1,7 @@
 # Uriel, Lord of Hosts
 
+![Uriel, Lord of Hosts](https://raw.githubusercontent.com/KDavidP1987/Uriel-Lord-of-Hosts/main/docs/img/uriel-cover.jpg)
+
 A **server-side** umbrella mod for V Rising dedicated servers — a *host* of
 independent, admin-toggleable quality-of-life enhancements and structural fixes.
 

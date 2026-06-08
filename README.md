@@ -1,5 +1,7 @@
 # Uriel, Lord of Hosts
 
+![Uriel, Lord of Hosts](https://raw.githubusercontent.com/KDavidP1987/Uriel-Lord-of-Hosts/main/docs/img/uriel-cover.jpg)
+
 A **server-side** BepInEx mod for [V Rising](https://playvrising.com/) dedicated
 servers — a *host* of independent quality-of-life enhancements and structural
 fixes, each individually toggleable by server admins.
