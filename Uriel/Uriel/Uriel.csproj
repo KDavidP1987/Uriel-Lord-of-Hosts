@@ -11,6 +11,8 @@
 		<BepInExPluginName>Uriel</BepInExPluginName>
 		<Description>Uriel, Lord of Hosts — a host of server-side quality-of-life enhancements and structural fixes for V Rising dedicated servers.</Description>
 		<Authors>kdpen</Authors>
+		<Copyright>Copyright © 2026 Kristopher Penland</Copyright>
+		<PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
 		<NuGetAudit>false</NuGetAudit>
 		<RestoreSources>
 			$(RestoreSources);

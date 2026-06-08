@@ -229,4 +229,8 @@ Uriel stands on the shoulders of the V Rising modding community. Big thanks to:
 
 ## License
 
-**MIT** — open source on [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts).
+Licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)** —
+copyright © 2026 Kristopher Penland. Uriel adapts techniques from odjit's
+AGPL-licensed KindredCommands & KindredSchematics and is released under the same
+copyleft license; full corresponding source is on
+[GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts).

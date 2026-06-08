@@ -48,6 +48,10 @@ batch, patch = fixes).
   No material refund in this version.
 
 ### Notes
+- **License:** Uriel is released under the **GNU AGPL-3.0**. It adapts
+  server-side modding techniques from odjit's AGPL-licensed KindredCommands and
+  KindredSchematics; in keeping with their copyleft, Uriel carries the same
+  license (relicensed from MIT before first publish).
 - A swapped/rebuilt stair is now a **NEW entity** (new ids for root + every
   child) — BCH must not cache stair entity ids across a swap (handoff §4.7 +
   feature-state row updated).

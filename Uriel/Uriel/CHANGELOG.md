@@ -15,6 +15,8 @@ Condensed, player-facing changelog. Full technical history:
 - New config `[StairSwap] RespawnGapFrames` (default 5) to tune the rebuild.
 - Note: a swapped stair is rebuilt as a fresh object — if anything ever looks
   off, dismantle & rebuild it.
+- Licensed under **AGPL-3.0** (Uriel adapts techniques from odjit's
+  KindredCommands & KindredSchematics and shares their copyleft license).
 
 ## 0.13.2 (2026-06-07)
 

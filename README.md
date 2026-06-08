@@ -185,4 +185,11 @@ valued.
 
 ## License
 
-[MIT](LICENSE)
+Licensed under the **GNU Affero General Public License v3.0
+([AGPL-3.0](LICENSE))** — copyright © 2026 Kristopher Penland.
+
+Uriel adapts server-side modding techniques and patterns from odjit's
+AGPL-licensed [KindredCommands](https://github.com/Odjit/KindredCommands) and
+[KindredSchematics](https://github.com/Odjit/KindredSchematics); in keeping with
+their copyleft, Uriel is released under the same license. As an AGPL work, the
+complete corresponding source is available in this repository.
