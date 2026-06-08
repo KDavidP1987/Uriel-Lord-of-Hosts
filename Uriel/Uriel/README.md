@@ -24,7 +24,7 @@ welcome too.
 ---
 
 **Repo:** https://github.com/KDavidP1987/Uriel-Lord-of-Hosts
-**Status:** pre-1.0 public testing · **server-side only** · two feature groups
+**Status:** pre-1.0 public testing · **server-side only** · several feature groups
 live today, more sub-mods planned under the Uriel umbrella.
 
 ## What it does
@@ -32,6 +32,30 @@ live today, more sub-mods planned under the Uriel umbrella.
 Uriel is never all-or-nothing: **every feature ships behind its own config
 switch**, and all sharing/editing is **per-object opt-in** — nothing is ever
 shared or changed server-wide on your behalf.
+
+### 🏺 Object Spawning *(collect & place world objects)*
+
+Bring **world objects the build menu never offers** into your castle — resource
+nodes, world chests, breakable crates and urns, and decorative props from across
+the map (GloomRot, Cursed Forest, dungeons, ruins). Spawn one at your aim point
+inside your own plot; it's **indestructible and decay-proof by default**, and you
+move/rotate/remove it with `.uriel move` / `.uriel rotate` / `.uriel despawn`.
+Everything you place persists across restarts and is cleaned up automatically if
+its castle is ever destroyed.
+
+**Collect them by playing (Discovery mode).** You unlock an object by **destroying
+one in the world** — chop a tree, smash a crate, break an ore vein — with an
+admin-set chance to "learn" it. `.uriel unlocks` shows your collection and
+percentage; `.uriel catalog` browses everything that exists; `.uriel notify on|off`
+toggles the unlock messages. Roughly half of all objects can't be destroyed — those
+unlock when you hit 100% collection, **defeat Dracula** (finish the game), or per
+boss via an admin-curated map. Admins choose the model (or turn it off), can set a
+build cost, block specific objects, and grant objects directly.
+
+> **How it's managed:** spawned world objects are placed and moved with the
+> `.uriel` commands above, not the vanilla build menu (an engine limitation —
+> the game won't let arbitrary world objects be selected in build mode). The
+> optional **BloodCraftHub** companion can present a point-and-click palette UI.
 
 ### 🗄 Public Storage *(per-container opt-in)*
 
@@ -113,10 +137,41 @@ through the `.uriel` chat commands, with or without BloodCraftHub.
 ## Commands
 
 All commands are chat commands prefixed with `.uriel`. Type `.uriel` for a quick
-overview, or `.help uriel` for VCF's full generated list. Most targeted commands
-also accept a trailing **`nearest`** token to act on the closest object to you
-instead of where you're aiming — handy when a menu or UI panel has your aim ray
-pointing elsewhere (e.g. `.uriel share nearest`, `.uriel stairswap stone2 nearest`).
+overview, or **`.uriel help`** for a clean, topic-by-topic menu (`objects` /
+`storage` / `stairs` / `admin`). Most targeted commands also accept a trailing
+**`nearest`** token to act on the closest object to you instead of where you're
+aiming — handy when a menu or UI panel has your aim ray pointing elsewhere
+(e.g. `.uriel share nearest`, `.uriel stairswap stone2 nearest`).
+
+<details>
+<summary><b>🏺 Object Spawning commands</b></summary>
+
+**Players** (active when `ObjectSpawn.AdminOnly=false`; you must be inside your own castle plot):
+
+| Command | What it does |
+|---|---|
+| `.uriel spawn <name\|guid> [rot 0-3] [breakable]` | Place an object you've unlocked at your aim point (indestructible & decay-proof by default) |
+| `.uriel move` / `.uriel rotate [0-3]` / `.uriel despawn` | Move / turn / remove the nearest object you spawned |
+| `.uriel unlocks` | Your collected objects + collection % |
+| `.uriel catalog [page]` | Browse the full world-object catalog |
+| `.uriel findprefab <text>` | Search objects by name |
+| `.uriel notify <on\|off>` | Toggle your object-unlock chat messages |
+
+In **Discovery** mode you unlock objects by **destroying them in the world**; the non-destructible ones unlock on full collection, boss defeats, or admin grant.
+
+<details>
+<summary><i>Admin sub-commands</i></summary>
+
+| Command | What it does |
+|---|---|
+| `.uriel grant\|revoke <player> <name\|guid>` | Unlock / remove an object for a player |
+| `.uriel grantall <player> [all\|destructible\|indestructible]` | Bulk-grant the catalog (or a subset) |
+| `.uriel block\|unblock <guid>` · `.uriel blocklist` | Forbid / allow a prefab |
+| `.uriel spawnlist` · `.uriel purgeplot` | List / clear spawned objects on the plot |
+| `.uriel bossmap add\|remove\|list <vblood> <obj>` | Curate which objects a V-blood defeat unlocks |
+| `.uriel api version\|catalog\|unlocked` | Machine API for BloodCraftHub |
+</details>
+</details>
 
 <details>
 <summary><b>🗄 Public Storage &amp; Prison commands</b></summary>
@@ -176,6 +231,15 @@ Config changes take effect on server restart.
 
 | Section | Key | Default | Effect |
 |---|---|---|---|
+| ObjectSpawn | Enabled | `true` | Master switch for object spawning |
+| ObjectSpawn | AdminOnly | `true` | When true, only admins may spawn — set `false` to open the player collection path |
+| ObjectSpawn | PlayerAccessMode | `Discovery` | `Discovery` (unlock by destroying) or `Full` (whole catalog) |
+| ObjectSpawn | DiscoveryChancePercent | `25` | Chance (0–100) that destroying a world object unlocks it |
+| ObjectSpawn | NonDestructibleUnlock | `Off` | How non-destructible objects unlock: `Off`/`Collection`/`FinalBoss`/`AllBosses` |
+| ObjectSpawn | IncludeCastleBuildables | `false` | Include the normal build-menu pieces in the catalog (off = world objects only) |
+| ObjectSpawn | PrefabCostItem / PrefabCostStack | `0` / `0` | Item + amount a player pays to build one object (0 = free) |
+| ObjectSpawn | Indestructible | `true` | Spawned objects are immortal + decay-proof (turn off on PvP) |
+| ObjectSpawn | *(more)* | — | CollectionEnabled, BossUnlocksEnabled, DiscoveryNotify, RefundOnRemove, PurgeOrphansOnBoot — see the generated `.cfg` |
 | PublicStorage | Enabled | `true` | Master switch for chest sharing |
 | PublicStorage | PrisonEnabled | `true` | Independently allow prison-cell sharing |
 | PublicStorage | MaxTargetDistance | `5` | Aim distance for `.uriel share` / `unshare` targeting |

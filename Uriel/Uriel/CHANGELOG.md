@@ -3,6 +3,31 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.15.0 (2026-06-08)
+
+- **New feature: Object Spawning — collect & place WORLD objects in your castle!**
+  Bring in resource nodes, world chests, breakable props, and dungeon/GloomRot/
+  Cursed decor that the normal build menu never offers. `.uriel spawn <object>`
+  places it inside your plot; `.uriel move` / `.uriel rotate` / `.uriel despawn`
+  manage it. Spawned objects are indestructible & decay-proof by default.
+- **Collect them by playing.** In Discovery mode you unlock an object by
+  **destroying one in the world** (admin-set % chance) — trees, chests, ore
+  nodes, crates. `.uriel unlocks` shows your collection and %; `.uriel catalog`
+  browses everything; `.uriel notify on|off` toggles the unlock messages.
+- **Finish the game, get the rest.** The ~half of objects that can't be destroyed
+  can unlock on 100% collection, on **defeating Dracula**, or per-boss via an
+  admin map — admin's choice (or off).
+- **Admin controls:** Full vs Discovery access, a build cost, block/allow specific
+  prefabs, grant objects to players, and a kill-switch for the whole collection
+  system. Castle build-menu pieces are excluded by default (this is about the
+  *world* objects you can't otherwise get).
+- **In-game help got friendlier:** `.uriel help` now gives a clean, topic-by-topic
+  menu (`objects` / `storage` / `stairs` / `admin`) instead of one long list.
+- Optional BloodCraftHub integration: a machine API exposes the object catalog and
+  each player's collection for a future client-side palette UI.
+- Note: spawned world objects are managed with the `.uriel` commands above, not
+  the vanilla build menu (an engine limitation).
+
 ## 0.14.0 (2026-06-07)
 
 - **Stair swap now applies INSTANTLY — no restart needed!** Restyling a staircase

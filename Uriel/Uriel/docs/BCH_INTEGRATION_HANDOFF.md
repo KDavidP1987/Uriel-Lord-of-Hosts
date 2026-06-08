@@ -17,14 +17,17 @@
 > to Bloodcraft and Beelzebub. This doc is the contract; implementation
 > happens in the BCH workspace.
 >
-> **Canonical source of truth:** `Uriel/Uriel/Commands/*.cs`. Uriel has **no
-> machine-readable `api` command yet** (see §6) — current replies are
-> human-facing chat text. If this doc and the code disagree, the code wins and
-> this doc gets corrected.
+> **Canonical source of truth:** `Uriel/Uriel/Commands/*.cs`. The machine wire
+> API now EXISTS for object spawning (`Commands/ApiCommands.cs`, `[CommandGroup("uriel api")]`)
+> — see §6. Other surfaces (shares/stairs) are still human-facing chat text. If
+> this doc and the code disagree, the code wins and this doc gets corrected.
 
-**Current server build: Uriel v0.10.0 (2026-06-07). No ApiVersion yet — the
-machine wire API is 📋 planned; BCH should tell Uriel which endpoints it wants
-first.**
+**⭐ Catch-up: the `[URIEL:*]` wire API has LANDED at ApiVersion 1 (uncommitted
+working tree, 2026-06-08) — covering the new Object Spawning feature: `.uriel api
+version` / `catalog` / `unlocked`. This exposes the total in-game prefab catalog and
+each player's unlocked-prefab collection (the "Uriel list" BCH wants), analogous to
+Beelzebub's ability-catalog API. Shares/stairs endpoints remain 📋 planned. Object
+Spawning itself (Phase 1–2) is built but not yet released.**
 
 ---
 
@@ -170,24 +173,88 @@ for the `[URIEL:*]` API before building heavy parsers):**
 | Stair swap | ✅ v0.14.x destroy+respawn, applies LIVE (validated straight/curved/wide) | swapped stair = NEW entity (root + all fused children) — re-resolve by position after a swap; never cache stair ids |
 | Config kill-switches | ✅ | `PublicStorage.Enabled`, `PublicStorage.PrisonEnabled`, `StairSwap.Enabled` — commands reply "disabled by the server admin"; BCH should hide UI on that reply |
 
-## 6. 📋 Planned machine wire API (implement in Uriel BEFORE BCH parses)
+## 6. Machine wire API (`[CommandGroup("uriel api")]`, ApiVersion 1)
 
-Mirroring the Beelzebub `[BEELZ:*]` pattern: an `.uriel api …` command group
-emitting `[URIEL:…]` lines, gated by `ApiVersion` (starts at 1), chunked like
-Beelzebub's for long replies. Proposed endpoints — **BCH: rank these and
-Uriel will implement in that order, bumping this doc per the change rule:**
+Mirroring the Beelzebub `[BEELZ:*]` pattern. Every line begins `[URIEL:<tag>]` +
+space-separated `key=value` tokens (bare; prefab names are `[A-Za-z0-9_]`). Lists are
+**paged — one reply per page, under VCF's 512-byte cap** — and terminated with
+`[URIEL:end] cmd=<name> page=<x>/<y> count=<n>`. Sentinels: `-` unknown, `0/1` booleans.
 
+### ✅ Implemented (ApiVersion 1) — Object Spawning collection
 ```
-.uriel api version          → [URIEL:version] api=1 plugin=0.10.0 ready=1 storage=1 prison=1 stairs=1
-.uriel api shares <page>    → [URIEL:shares] page=1/1 n=3
-                              [URIEL:share] guid=<prefab> tile=<x>,<y> class=storage perm=givetake limit=2/24h cost=<itemguid>x5 by=<steamId>
+.uriel api version          → [URIEL:version] api=1 plugin=<ver> ready=1 objectspawn=1 adminonly=0|1
+                              collection=0|1 mode=Discovery|Full chance=<0-100> total=<N> discoverable=<D> blocked=<B>
+.uriel api catalog <page>   → [URIEL:catalog] page=1/Y total=<N> discoverable=<D>
+                              [URIEL:object] guid=<int> disc=0|1 label=<token> cat=<category>   (×3/page)
+                              [URIEL:end] cmd=catalog page=1/Y count=<n>
+.uriel api unlocked <page>  → [URIEL:unlocked] page=1/Y steam=<id> n=<count> discoverable=<D> pct=<%>
+                              [URIEL:object] guid=<int> disc=0|1 label=<token> cat=<category>   (×3/page; SELF only)
+                              [URIEL:end] cmd=unlocked page=1/Y count=<n>
+```
+**`[URIEL:object]` fields:** `guid` = the spawn id (BCH fires `.uriel spawn <guid>`); `disc` =
+1 if discoverable-by-destruction; `label` = a humanized display name, **wire-safe (spaces→`_`)** —
+reverse `_`→space for display, or ignore it and resolve the true localized name + icon client-side
+by `guid`; `cat` = a coarse category for grouping + fallback icons, one of
+`container|plant|ore|breakable|light|furniture|resource|buildable|decor|other` (treat unknown as
+`decor`). The raw dev `name=` was intentionally dropped — BCH resolves it from `guid` client-side
+(same place it gets the icon), which keeps each page under the 512-byte cap.
+
+- `catalog` = the **total prefab list available in-game** (placeable WORLD objects; excludes units,
+  abilities, internals, admin-blocked, and — unless `IncludeCastleBuildables=true` — castle build pieces).
+- `unlocked` = the **calling player's** unlocked prefabs + collection `pct` (of the discoverable set;
+  blocked/invalid never counted). Self-scoped; admins read others via chat `.uriel unlocks <player>`.
+- `version`: `collection` master on/off; `mode`/`chance` = discovery rules; `blocked` = blocklist size.
+  Errors: `[URIEL:err] code=notready|disabled`.
+
+**⚠️ Transport guidance (important — the chat channel is 512 bytes/msg, 3 objects/page):**
+- For the **player's spawn menu, page `unlocked`** — it's what they can actually build and is small
+  (grows with play). Don't enumerate the whole `catalog` to build the menu.
+- For **collection progress** (e.g. "812 / 1500 = 54%"), read the counts from `version` (`total`,
+  `discoverable`) and `unlocked` (`pct`, `n`) — you do NOT need to page every object.
+- Only page the full `catalog` for an optional "everything that exists to collect" browse, and
+  **cache it aggressively** (it can be hundreds of pages). It only changes on server config/blocklist
+  changes — pull once per session.
+
+- Player-facing chat equivalents (non-API): `.uriel catalog [page]`, `.uriel unlocks`,
+  `.uriel notify <on|off>` (per-player message suppression). Admin: `.uriel block`/`unblock`/
+  `blocklist`, `.uriel grant`/`revoke`/`grantall`, `.uriel bossmap`.
+
+### 🎨 Object palette UI: rendering icons/previews (server can't ship images)
+
+Architectural guidance for a BCH "spawnable objects" panel:
+
+- **The vanilla build menu can't host these.** Uriel proved (Phase 1) that making a world object
+  build-menu-SELECTABLE needs castle-heart placement REGISTRATION that component grafting can't
+  reproduce. So BCH builds its **own palette window**, not an injection into the vanilla menu. Click →
+  BCH sends `.uriel spawn <guid>` (server executes; it has the ECS authority to instantiate).
+- **The dedicated server has NO images to send.** It's headless — it never loads sprites/textures/
+  meshes, and the icon reference isn't even in the server-side ECS data (verified: a buildable's dump
+  has no icon field; UI icons live in the CLIENT's managed-asset/icon registry, keyed by PrefabGUID).
+  So Uriel passes only the **PrefabGUID** (already in `[URIEL:object] guid=…`); BCH resolves visuals
+  **client-side**.
+- **Icons by GUID, client-side:** the game registers UI icons only for things shown in UI — inventory
+  items, abilities, and **build-menu buildables**. So:
+  - Castle buildables (excluded by default via `IncludeCastleBuildables`) DO have a resolvable
+    build-menu icon BCH can look up by GUID.
+  - **World objects — the feature's focus — have NO vanilla UI icon** (they never appear in a menu).
+- **For world objects, BCH's realistic options (all client-side):**
+  1. **Live 3D preview render** — the CLIENT has the model assets (it renders the spawned object in
+     world), so BCH can instantiate the prefab model into a render-texture "preview camera" and show
+     that thumbnail. Highest fidelity; the only way to get a true picture of an icon-less world object.
+  2. **Category/fallback icons** — BCH ships a small set (chest/resource/tree/urn/decor) keyed off the
+     name or a category hint.
+  3. **Name + metadata only** (humanized label + disc/tier flags).
+- **What Uriel can add to help (ask if wanted):** the API can enrich `[URIEL:object]` with a humanized
+  `label=` and a `cat=` category tag (chest/resource/decor/…) to drive fallback icons + grouping —
+  Beelzebub-style additive fields. Uriel CANNOT provide the image itself (no assets server-side).
+
+### 📋 Still planned (rank these and Uriel will implement in order)
+```
+.uriel api shares <page>    → [URIEL:share] guid=<prefab> tile=<x>,<y> class=storage perm=givetake limit=2/24h cost=<itemguid>x5 by=<steamId>
 .uriel api info             → single [URIEL:share] row for the aimed container (or [URIEL:share] none=1)
 .uriel api stairinfo        → [URIEL:stair] archetype=Single_CW current=stone2 owned=stone1,stone2,stone3 locked=gloomrot:DLC_Gloomrot,…
-.uriel api items <page> <search> → [URIEL:item] name=… guid=…
 ```
-
-Capability gating: `api>=N` per endpoint once versions move. Sentinels: `-`
-unknown, `0/1` booleans (Beelzebub conventions).
+Capability gating: `api>=N` per endpoint once versions move.
 
 ## 7. Change discipline (the living-contract rule)
 

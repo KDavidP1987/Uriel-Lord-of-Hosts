@@ -8,6 +8,83 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.15.0] - 2026-06-08
+
+### Added — Object Spawning: collect & place world objects into your castle
+
+A new umbrella feature (`docs/features/OBJECT_SPAWNING.md`). Players collect
+**world objects** the build menu never offers — resource nodes, world chests,
+breakable props, GloomRot/Cursed/dungeon decor — and place them inside their
+castle. Built across four phases:
+
+- **Spawn engine (`ObjectSpawnService`).** Generalizes the proven stair recipe:
+  resolve `PrefabGUID` (name or int) → `Instantiate` → strip `Disabled` →
+  write `Translation`/`Rotation` + tile-grid (`TilePosition`/`TileBounds`/
+  `StaticTransformCompatible`) → adopt into the surrounding castle (copy
+  `CastleHeartConnection`/`Team`/`TeamReference`/`UserOwner` off the resolved
+  heart) → `Immortal` + `CastleDecayAndRegen.CanDieFromDecay=false` by default
+  (per-spawn `breakable` override; PvP servers can default it off).
+- **Spawn-chain controllers refused.** `Chain_*` prefabs are `SpawnChainData`
+  controllers, not objects — instantiating one spawns an uncontrollable child, so
+  our edits hit the inert controller. Now detected and refused with a pointer to
+  the real object.
+- **Runtime object catalog (classifier).** The spawnable set is filtered by
+  component signature to REAL placeable world objects, excluding: characters/NPCs
+  (`CHAR_*` + a `Movement` backstop — units carry `TilePosition` like decor),
+  ability-effect objects (`AB_*`), debug/`GM_`/`Liquid_`/internal families,
+  spawn-chain controllers, and — unless `IncludeCastleBuildables=true` —
+  the inherent build-menu pieces (identified by `BlueprintData`, ~1200 of them).
+  `.uriel findprefab` ranks exact>prefix>substring; `.uriel catalog` browses all.
+- **Placement gate (territory-based).** A spawn/move must land INSIDE a castle
+  plot (`CastleTerritory` → owning `CastleHeart`, KindredCommands pattern):
+  non-admins only in a plot their team OWNS, admins any plot, open-world refused.
+- **Persistence + lifecycle.** `spawned_objects.json` (keyed by prefab GUID + tile
+  coords) → despawn/move/rotate work across sessions; Immortal/decay re-apply on
+  boot; orphan objects whose castle is gone are purged on boot
+  (`PurgeOrphansOnBoot`, default on). `.uriel spawnlist` / `.uriel purgeplot`
+  manage a whole plot. Move/rotate are respawn-based (these objects render from
+  baked static batches; an in-place edit risks the stair invisible-until-restart bug).
+- **Player access model (config).** `PlayerAccessMode` = `Full` (whole catalog) or
+  `Discovery` (only objects you've unlocked). `CollectionEnabled` master switch.
+  Build cost (`PrefabCostItem`/`PrefabCostStack`, charged from the player's
+  inventory; `RefundOnRemove`). Players act only when `AdminOnly=false`.
+- **Discovery-by-destruction.** A Harmony postfix on `DeathEventListenerSystem`:
+  when a player destroys an eligible world object (`Health` + `DestroyOnDeath`,
+  not a build piece), roll `DiscoveryChancePercent` to unlock it. Per-player
+  `player_unlocks.json`; per-player `.uriel notify on|off`; already-owned
+  destructions never re-notify.
+- **Non-destructible unlock paths** (`NonDestructibleUnlock` = `Off`/`Collection`/
+  `FinalBoss`/`AllBosses`): roughly half of placeable objects can't be destroyed,
+  so they unlock on collecting 100% of the discoverable set, on defeating Dracula
+  (`CHAR_Vampire_Dracula_VBlood`, game completion), or on defeating every main
+  V-blood. Plus a curated `boss_unlocks.json` (`BossUnlocksEnabled` +
+  `.uriel bossmap`) mapping a V-blood → the objects its defeat grants.
+- **Admin tools.** `.uriel grant`/`revoke`/`grantall <player> [mode]`,
+  `.uriel block`/`unblock`/`blocklist` (forbid prefabs — excluded from the catalog
+  and the collection percentage), `.uriel bossmap add|remove|list`.
+- **BloodCraftHub wire API** (`[CommandGroup("uriel api")]`, ApiVersion 1):
+  `.uriel api version` / `catalog` / `unlocked` emit `[URIEL:*]` lines (the total
+  in-game object list + a player's collection + `pct`), with `label=`/`cat=`
+  display metadata for a BCH palette. The dedicated server has no images to ship;
+  BCH resolves icons/previews client-side by GUID. Contract in
+  `Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md` §6.
+
+### Added — nested in-game help
+
+- **`.uriel help [objects|storage|stairs|admin]`** — a clean, paged help tree so
+  players without the BloodCraftHub UI can discover features without a wall of
+  text. The bare `.uriel` overview now names all three feature groups.
+
+### Known limitations (Object Spawning)
+
+- World objects are NOT selectable in the vanilla build menu (vanilla selection
+  needs castle-heart placement registration that component grafting can't
+  reproduce — proven live). They're managed by `.uriel move`/`rotate`/`despawn`.
+- V-blood (feed) kill detection for boss-based unlocks rides the same death hook;
+  if a feed-kill doesn't register as a player kill, boss/final-boss/all-boss
+  triggers won't fire (pending live validation) — the 100%-collection trigger has
+  no such dependency.
+
 ## [0.14.0] - 2026-06-07
 
 ### Changed — stair swap now applies LIVE (destroy + respawn)

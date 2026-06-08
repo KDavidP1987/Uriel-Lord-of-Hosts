@@ -10,13 +10,13 @@ namespace Uriel.Commands;
 /// </summary>
 internal static class RootCommands
 {
-    [Command("uriel", description: "Uriel overview — what the mod does and how to start.")]
+    [Command("uriel", description: "Uriel overview — what the mod does and how to get help.")]
     public static void Uriel(ChatCommandContext ctx)
     {
-        ctx.Reply("Uriel, Lord of Hosts — a host of server enhancements.");
-        ctx.Reply($"Version {MyPluginInfo.PLUGIN_VERSION}. Features arrive incrementally; each is admin-toggleable in config.");
-        ctx.Reply("Public storage: aim at your chest → .uriel share / unshare / shared / info");
-        ctx.Reply("Sharing rules: .uriel share permission|limithours|limitwithdrawal|cost — payments: .uriel paychest. Item ids: .uriel finditem <name>");
-        ctx.Reply("Use .help uriel for the full command list.");
+        ctx.Reply(
+            $"Uriel, Lord of Hosts - a host of server enhancements (v{MyPluginInfo.PLUGIN_VERSION}). " +
+            "Each feature is admin-toggleable in config.\n" +
+            "Features: OBJECTS (collect & build world objects), STORAGE (share chests), STAIRS (restyle stairs).\n" +
+            "Type '.uriel help' for the command menu, or jump in: '.uriel help objects | storage | stairs | admin'.");
     }
 }

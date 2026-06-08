@@ -48,6 +48,26 @@ internal static class EntityExtensions
         Core.EntityManager.SetComponentData(entity, value);
     }
 
+    /// <summary>
+    /// Write a component, adding it first if the entity doesn't already carry it
+    /// (the spawn path grafts Immortal / CastleDecayAndRegen onto prefabs that may
+    /// lack them). Unlike <see cref="With{T}"/> this never no-ops on a missing component.
+    /// </summary>
+    public static void AddOrSet<T>(this Entity entity, T value) where T : unmanaged
+    {
+        if (!entity.Exists()) return;
+        if (!Core.EntityManager.HasComponent<T>(entity))
+            Core.EntityManager.AddComponent<T>(entity);
+        Core.EntityManager.SetComponentData(entity, value);
+    }
+
+    /// <summary>Remove a component if present (no-op otherwise).</summary>
+    public static void RemoveIfPresent<T>(this Entity entity)
+    {
+        if (entity.Has<T>())
+            Core.EntityManager.RemoveComponent<T>(entity);
+    }
+
     public static ulong GetSteamId(this Entity playerCharacter)
     {
         if (playerCharacter.TryGetComponent<PlayerCharacter>(out var pc)

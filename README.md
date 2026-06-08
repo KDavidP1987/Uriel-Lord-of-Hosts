@@ -23,11 +23,12 @@ GitHub issues are welcome too.
 
 ## Features
 
-Two feature groups are live today, with more sub-mods planned under the umbrella.
+Several feature groups are live today, with more sub-mods planned under the umbrella.
 Every feature ships behind its own config switch — Uriel is never all-or-nothing.
 
 | Feature | Status | Design doc |
 |---|---|---|
+| **Object spawning** — collect & place **world objects** the build menu never offers (resource nodes, world chests, breakable props, dungeon/GloomRot/Cursed decor) inside your castle plot; runtime catalog classifier (units/abilities/internals/castle-buildables filtered out), territory-gated placement, JSON persistence + orphan cleanup, a collect-by-destruction unlock model (Discovery/Full access, build cost, boss/completion unlocks for non-destructibles), admin block/grant tools, and a `[URIEL:*]` API for BloodCraftHub | Implemented; placement/catalog/discovery validated live; boss-kill unlock triggers + BCH API consumption pending validation | [docs/features/OBJECT_SPAWNING.md](docs/features/OBJECT_SPAWNING.md) |
 | **Public storage** — per-container opt-in: mark a specific chest publicly accessible, with optional permissions (take/give), per-player withdrawal limits, per-stack access costs paid to the owner, and `nearest` targeting for UI relays | Implemented; open+take validated live; rebuild-on-share mechanism + policies pending broader validation | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
 | **Public prison cells** — separately mark a prison cell publicly accessible: feed/extract via the native UI, prisoner takeover via `.uriel takeprisoner` (the native subdue button is client-gated to the cell's clan — confirmed unreachable server-side) | Implemented; feed/extract validated live; takeprisoner pending broader validation | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
 | **Stair editing** — restyle placed stairs **live** (destroy+respawn; same-shape cosmetics only, per-user DLC gating), plus `.uriel removestairs` to cleanly delete a staircase without disturbing connected floors/walls | Implemented; live restyle validated locally on straight/curved/wide shapes; broader testing pending | [docs/features/STAIR_HOTSWAP.md](docs/features/STAIR_HOTSWAP.md) |
@@ -40,9 +41,42 @@ Every feature ships behind its own config switch — Uriel is never all-or-nothi
 ## Commands
 
 Chat commands prefixed with `.uriel` (VCF). Type `.uriel` for an overview or
-`.help uriel` for the full generated list. Most targeted commands accept a
-trailing **`nearest`** token to act on the closest object instead of where
-you're aiming (for UI relays / when a menu has your aim ray pointing away).
+**`.uriel help`** for a clean, topic-by-topic menu (`objects` / `storage` /
+`stairs` / `admin`). Most targeted commands accept a trailing **`nearest`** token
+to act on the closest object instead of where you're aiming (for UI relays / when
+a menu has your aim ray pointing away).
+
+<details>
+<summary><b>🏺 Object Spawning commands</b></summary>
+
+**Players** (active when `ObjectSpawn.AdminOnly=false`; you must be inside your own castle plot):
+
+| Command | What it does |
+|---|---|
+| `.uriel spawn <name\|guid> [rot 0-3] [breakable]` | Place an object you've unlocked at your aim point. Indestructible & decay-proof by default |
+| `.uriel move` | Move the nearest object you spawned to your aim point |
+| `.uriel rotate [0-3]` | Rotate the nearest object you spawned (no arg = turn 90°) |
+| `.uriel despawn` | Remove the nearest object you spawned (refunds cost if enabled) |
+| `.uriel unlocks` | Your collected objects + collection % |
+| `.uriel catalog [page]` | Browse the full world-object catalog |
+| `.uriel findprefab <text>` | Search objects by name |
+| `.uriel notify <on\|off>` | Toggle your object-unlock chat messages |
+
+In **Discovery** mode you unlock objects by **destroying them in the world** (configurable chance); non-destructible objects unlock on full collection / boss defeats / admin grant.
+
+<details>
+<summary><i>Admin sub-commands</i></summary>
+
+| Command | What it does |
+|---|---|
+| `.uriel grant\|revoke <player> <name\|guid>` | Unlock / remove an object for a player |
+| `.uriel grantall <player> [all\|destructible\|indestructible]` | Bulk-grant the catalog (or a subset) |
+| `.uriel block\|unblock <guid>` · `.uriel blocklist` | Forbid / allow a prefab (excluded from catalog + collection %) |
+| `.uriel spawnlist` · `.uriel purgeplot` | List / clear all spawned objects on the plot you're in |
+| `.uriel bossmap add\|remove\|list <vblood> <obj>` | Curate which objects a V-blood defeat unlocks |
+| `.uriel api version\|catalog\|unlocked` | `[URIEL:*]` machine API for BloodCraftHub |
+</details>
+</details>
 
 <details>
 <summary><b>🗄 Public Storage &amp; Prison commands</b></summary>
