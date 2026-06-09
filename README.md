@@ -53,8 +53,8 @@ a menu has your aim ray pointing away).
 
 | Command | What it does |
 |---|---|
-| `.uriel spawn <name\|guid> [rot 0-3] [breakable]` | Place an object you've unlocked at your aim point. Indestructible & decay-proof by default |
-| `.uriel move` | Move the nearest object you spawned to your aim point |
+| `.uriel spawn <name\|guid> [rot 0-3] [flags…]` | Place an object you've unlocked at your aim point. Indestructible & decay-proof by default; flags (any order, after rotation): `breakable`, `smashable` (owner can break it), `respawn` (auto-returns), `here` (place at your location) |
+| `.uriel move [here]` | Move the nearest object you spawned to your aim point (or `here` = your location) |
 | `.uriel rotate [0-3]` | Rotate the nearest object you spawned (no arg = turn 90°) |
 | `.uriel despawn` | Remove the nearest object you spawned (refunds cost if enabled) |
 | `.uriel unlocks` | Your collected objects + collection % |

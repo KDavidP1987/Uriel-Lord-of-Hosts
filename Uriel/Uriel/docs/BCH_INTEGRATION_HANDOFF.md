@@ -22,12 +22,26 @@
 > — see §6. Other surfaces (shares/stairs) are still human-facing chat text. If
 > this doc and the code disagree, the code wins and this doc gets corrected.
 
-**⭐ Catch-up: the `[URIEL:*]` wire API has LANDED at ApiVersion 1 (uncommitted
-working tree, 2026-06-08) — covering the new Object Spawning feature: `.uriel api
-version` / `catalog` / `unlocked`. This exposes the total in-game prefab catalog and
-each player's unlocked-prefab collection (the "Uriel list" BCH wants), analogous to
-Beelzebub's ability-catalog API. Shares/stairs endpoints remain 📋 planned. Object
-Spawning itself (Phase 1–2) is built but not yet released.**
+**⭐ Catch-up: the `[URIEL:*]` wire API is LIVE at ApiVersion 1 — covering the new
+Object Spawning feature: `.uriel api version` / `catalog` / `unlocked`. This exposes
+the total in-game prefab catalog and each player's unlocked-prefab collection (the
+"Uriel list" BCH wants), analogous to Beelzebub's ability-catalog API. Shares/stairs
+endpoints remain 📋 planned. Object Spawning itself (Phase 1–2) is built but not yet
+released.**
+
+**🐞 FIXED 2026-06-08 — `api catalog`/`api unlocked` returned nothing (BCH P0).**
+The two paged commands built their whole page (header + rows + `[URIEL:end]`) as a
+single `\n`-joined string and sent it in **one** `ctx.Reply`. But a System-chat
+message is **one wire line** — BCH's reader (`UrielProtocolService.HandleLine` →
+`UrielWireParser.Parse`) and the proven Beelzebub pattern do NOT split on `\n`, so
+only the first line (the `catalog`/`unlocked` header) was parsed and every
+`[URIEL:object]`/`[URIEL:end]` row was lost → "no rows" → BCH's 6s scan timeout.
+`api version` worked only because it is a single line. **Fix (Uriel-side only, no BCH
+change):** each `[URIEL:*]` line is now emitted via its **own** `ctx.Reply`, exactly
+like Beelzebub emits one reply per `[BEELZ:*]` line. **No wire-shape change → ApiVersion
+stays 1**; the line grammar is identical, BCH already handles one-line-per-message and
+arbitrary page counts. Page size also went 3→20 rows (the old "3/page" only existed to
+fit a whole page under the 512-byte cap, which no longer applies per-line).
 
 ---
 
@@ -176,19 +190,22 @@ for the `[URIEL:*]` API before building heavy parsers):**
 ## 6. Machine wire API (`[CommandGroup("uriel api")]`, ApiVersion 1)
 
 Mirroring the Beelzebub `[BEELZ:*]` pattern. Every line begins `[URIEL:<tag>]` +
-space-separated `key=value` tokens (bare; prefab names are `[A-Za-z0-9_]`). Lists are
-**paged — one reply per page, under VCF's 512-byte cap** — and terminated with
-`[URIEL:end] cmd=<name> page=<x>/<y> count=<n>`. Sentinels: `-` unknown, `0/1` booleans.
+space-separated `key=value` tokens (bare; prefab names are `[A-Za-z0-9_]`). **Each line
+is its own chat message / `ctx.Reply` — a list page is a HEADER line, then one
+`[URIEL:object]` line per row, then an `[URIEL:end]` line** (BCH reads one line per
+message; it does NOT split on `\n`). Pages terminate with
+`[URIEL:end] cmd=<name> page=<x>/<y> count=<n>`. Each individual line stays under VCF's
+509-char reply cap. Sentinels: `-` unknown, `0/1` booleans.
 
 ### ✅ Implemented (ApiVersion 1) — Object Spawning collection
 ```
 .uriel api version          → [URIEL:version] api=1 plugin=<ver> ready=1 objectspawn=1 adminonly=0|1
                               collection=0|1 mode=Discovery|Full chance=<0-100> total=<N> discoverable=<D> blocked=<B>
 .uriel api catalog <page>   → [URIEL:catalog] page=1/Y total=<N> discoverable=<D>
-                              [URIEL:object] guid=<int> disc=0|1 label=<token> cat=<category>   (×3/page)
+                              [URIEL:object] guid=<int> disc=0|1 label=<token> cat=<category>   (≤20/page, each its own line)
                               [URIEL:end] cmd=catalog page=1/Y count=<n>
 .uriel api unlocked <page>  → [URIEL:unlocked] page=1/Y steam=<id> n=<count> discoverable=<D> pct=<%>
-                              [URIEL:object] guid=<int> disc=0|1 label=<token> cat=<category>   (×3/page; SELF only)
+                              [URIEL:object] guid=<int> disc=0|1 label=<token> cat=<category>   (≤20/page, each its own line; SELF only)
                               [URIEL:end] cmd=unlocked page=1/Y count=<n>
 ```
 **`[URIEL:object]` fields:** `guid` = the spawn id (BCH fires `.uriel spawn <guid>`); `disc` =
@@ -197,7 +214,7 @@ reverse `_`→space for display, or ignore it and resolve the true localized nam
 by `guid`; `cat` = a coarse category for grouping + fallback icons, one of
 `container|plant|ore|breakable|light|furniture|resource|buildable|decor|other` (treat unknown as
 `decor`). The raw dev `name=` was intentionally dropped — BCH resolves it from `guid` client-side
-(same place it gets the icon), which keeps each page under the 512-byte cap.
+(same place it gets the icon), which keeps each line short and the page compact.
 
 - `catalog` = the **total prefab list available in-game** (placeable WORLD objects; excludes units,
   abilities, internals, admin-blocked, and — unless `IncludeCastleBuildables=true` — castle build pieces).
@@ -206,7 +223,7 @@ by `guid`; `cat` = a coarse category for grouping + fallback icons, one of
 - `version`: `collection` master on/off; `mode`/`chance` = discovery rules; `blocked` = blocklist size.
   Errors: `[URIEL:err] code=notready|disabled`.
 
-**⚠️ Transport guidance (important — the chat channel is 512 bytes/msg, 3 objects/page):**
+**⚠️ Transport guidance (important — the chat channel is one wire line per message, ≤20 objects/page):**
 - For the **player's spawn menu, page `unlocked`** — it's what they can actually build and is small
   (grows with play). Don't enumerate the whole `catalog` to build the menu.
 - For **collection progress** (e.g. "812 / 1500 = 54%"), read the counts from `version` (`total`,
@@ -254,13 +271,50 @@ Architectural guidance for a BCH "spawnable objects" panel:
   `label=` and a `cat=` category tag (chest/resource/decor/…) to drive fallback icons + grouping —
   Beelzebub-style additive fields. Uriel CANNOT provide the image itself (no assets server-side).
 
-### 📋 Still planned (rank these and Uriel will implement in order)
+### 📋 Still planned — BCH-ranked implementation order (BCH request 2026-06-08)
+BCH wants all three; implement **in this order** (each retires a fragile human-text regex
+parser on the BCH side once it lands; gate each with `api>=N`):
 ```
-.uriel api shares <page>    → [URIEL:share] guid=<prefab> tile=<x>,<y> class=storage perm=givetake limit=2/24h cost=<itemguid>x5 by=<steamId>
-.uriel api info             → single [URIEL:share] row for the aimed container (or [URIEL:share] none=1)
-.uriel api stairinfo        → [URIEL:stair] archetype=Single_CW current=stone2 owned=stone1,stone2,stone3 locked=gloomrot:DLC_Gloomrot,…
+1. .uriel api info          → single [URIEL:share] row for the aimed/nearest container (or [URIEL:share] none=1).
+                              HIGHEST VALUE — powers the Storage tab's live "current rules" panel, retires the
+                              `.uriel info` regex. Shape: [URIEL:share] guid=<prefab> tile=<x>,<y> class=storage
+                              perm=givetake limit=2/24h cost=<itemguid>x5 by=<steamId>
+2. .uriel api shares <page> → paged [URIEL:share] rows (same shape). Powers a "My Shares" list, retires the
+                              `.uriel shared` numbered-text parse.
+3. .uriel api stairinfo     → [URIEL:stair] archetype=Single_CW current=stone2 owned=stone1,stone2,stone3
+                              locked=gloomrot:DLC_Gloomrot,… Powers a stair-style picker that greys out unowned
+                              styles, retires the `.uriel stairstyles` parse.
 ```
-Capability gating: `api>=N` per endpoint once versions move.
+When implemented, follow the §6 transport rule above: **one `ctx.Reply` per `[URIEL:*]` line**
+(header → rows → `[URIEL:end]`), never a `\n`-joined block.
+
+### ✅ Build-mode commands BCH relays — placement vs. targeting (updated 2026-06-08)
+**The cursor problem (UI buttons):** when the player clicks a BCH panel button, the V Rising cursor is
+on the UI, so the aim ray points *outside the plot* — aim-based PLACEMENT then fails with "…can only be
+spawned/placed in a castle plot." Commands that PLACE at a point therefore accept a player-position
+token; commands that only TARGET the nearest spawned object already use the player's feet and need no
+token.
+
+- **`.uriel spawn <guid> [rot] [flags…]`** — places at the aim point by default, **or at the player's
+  location with the `here` token** (aliases `nearest`/`me`). **From a UI button, BCH MUST append `here`**
+  (or `nearest`) so it lands in the plot the player is standing in. Flags are order-independent AFTER the
+  rotation slot (up to 4), e.g. `.uriel spawn 12345 0 here` or `.uriel spawn 12345 0 smashable respawn here`.
+  (The rotation int must come before the flags — `.uriel spawn 12345 here` would try to bind `here` to the
+  rotation and fail; send `0`.) **Durability/lifecycle flags** (optional — a BCH spawn panel can expose
+  these as toggles):
+  - `breakable` — raid/decay can destroy it (still castle-owned; the OWNER can't weapon-smash it — vanilla castle protection).
+  - `smashable` — breakable AND the owner can destroy it too (the object skips castle adoption; trade-off: not castle-owned, decays, anyone in the territory can damage it).
+  - `respawn` — auto-respawns after destruction until the castle is gone or the object is `.uriel despawn`ed (server config `ObjectSpawn.RespawnEnabled`, default on; cadence `ObjectSpawn.RespawnPollSeconds`, default 30s).
+  - `indestructible` — permanent (the default unless `ObjectSpawn.Indestructible=false`).
+- **`.uriel move [here]`** — moves the nearest spawned object to the aim point by default, **or to the
+  player's location with `here`/`nearest`**. **From a UI button, append `here`.** Bare still works for
+  in-world aim placement.
+- **`.uriel rotate [0-3]`** — rotates the nearest spawned object in place (no destination point). **Bare**
+  = one 90° step; optional `0-3` sets an absolute tile rotation. No position token needed.
+- **`.uriel despawn`** — removes the nearest spawned object (targets by the player's feet). **Bare.**
+
+`nearest` is accepted as a synonym of `here` on spawn/move so BCH's existing "UI relays append `nearest`"
+convention (§3, used for storage/stairs) extends here unchanged.
 
 ## 7. Change discipline (the living-contract rule)
 

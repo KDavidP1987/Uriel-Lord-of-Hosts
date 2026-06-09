@@ -42,6 +42,26 @@ internal static class Tick
         }
     }
 
+    /// <summary>True once the per-frame driver is live (so callers can avoid scheduling repeating work
+    /// that would otherwise fire immediately/synchronously in a tight loop).</summary>
+    public static bool IsRunning => _started;
+
+    /// <summary>Run <paramref name="action"/> every <paramref name="frames"/> frames, rescheduling itself
+    /// after each run. Safe if the driver is down: it runs once synchronously and then stops (never
+    /// busy-loops, since the reschedule is gated on the driver being live).</summary>
+    public static void RunRepeating(int frames, Action action)
+    {
+        if (action is null || frames <= 0) return;
+        Action loop = null;
+        loop = () =>
+        {
+            try { action(); }
+            catch (Exception ex) { Core.Log.LogWarning($"[Uriel] repeating action failed: {ex.Message}"); }
+            if (_started) RunLater(frames, loop);
+        };
+        RunLater(frames, loop);
+    }
+
     /// <summary>Run <paramref name="action"/> after N frames (immediately if the driver is unavailable).</summary>
     public static void RunLater(int frames, Action action)
     {

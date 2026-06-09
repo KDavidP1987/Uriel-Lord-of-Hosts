@@ -8,6 +8,89 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.17.0] - 2026-06-08
+
+### Added — Object Spawning: breakable modes + auto-respawn
+
+- **`smashable` spawn flag** — a breakable object the **owner can destroy by hand**,
+  not just raiders/decay. Implemented by skipping castle adoption in `ExecuteSpawn`
+  (a new `playerBreakable` path): the object never receives the owner's `Team` /
+  `CastleHeartConnection`, so the engine stops treating it as protected own-castle
+  property. Ownership and management are unaffected — `.uriel despawn`/`move` resolve
+  the owner from the object's **position** (the territory's heart), not its
+  components, and the spawn record still stores the heart tile. Trade-off (documented
+  in-reply): the object is un-owned, so it decays and anyone in the territory can
+  damage/interact with it.
+- **`respawn` spawn flag** — the object **auto-respawns after it's destroyed**, until
+  the castle heart is gone or the player `.uriel despawn`s it. A config-gated poll
+  (`ObjectSpawn.RespawnEnabled`, default on; `ObjectSpawn.RespawnPollSeconds`, default
+  30, min 5) re-spawns each flagged object whose entity is gone **and** whose castle
+  heart still resolves. The "destroyed vs streamed-out" guard is the safety crux: the
+  live-entity index is Disabled-included (a streamed-out object still resolves), and
+  respawn is gated on the heart existing — so a streamed-out region never duplicates
+  an object and a destroyed castle never resurrects one. The same record is re-used
+  (re-pointed at the fresh entity), so it never duplicates.
+- Spawn flags now parse order-independently after the rotation slot:
+  `breakable` · `smashable` · `respawn` · `here`/`nearest`/`me` · `indestructible`,
+  e.g. `.uriel spawn <prefab> 0 smashable respawn here`. `spawned_objects.json` schema
+  → **v3** (`Rot`, `RespawnOnDestroy`, `PlayerBreakable`; older records load as
+  0/false). Mode survives `.uriel move`/`rotate`.
+
+### Added — `here`/`nearest` placement token (spawn & move)
+
+- **`.uriel spawn … here`** and **`.uriel move here`** place at the **player's
+  location** instead of the aim/cursor point (aliases `nearest`/`me`). This fixes
+  spawning/placing from a **BloodCraftHub UI button**, where the cursor sits on the
+  panel and the aim ray lands outside the plot — which previously failed with "can
+  only be spawned in a castle plot." Aim-based placement is unchanged when no token is
+  given.
+
+### Fixed — breakable/indestructible now actually take effect (Health path)
+
+- Toggling `breakable`/`indestructible` was a **no-op on most world objects**. Audit
+  of the prefab data showed world chests AND furniture carry **no native `Immortal`**
+  — their destructibility is the **Health path** (`Health` + `HealthConstants.
+  DestroyOnDeath` + a `DestroyAfterDuration` auto-despawn timer), which the old
+  `Immortal`-only toggle never touched. `ExecuteSpawn` now drives both mechanisms:
+  indestructible = `Immortal` + decay-off + `DestroyOnDeath=false` + strip the
+  auto-despawn timers; breakable = clear `Immortal` + `DestroyOnDeath=true` + strip
+  the timers. This also fixes a latent bug where an "indestructible" world chest would
+  silently vanish on its ~1200s `DestroyAfterDuration` clock.
+- ⚠ Note: while an object is castle-adopted (raid/decay-only `breakable`), V Rising
+  blocks the **owner** from weapon-smashing it (vanilla castle protection); that's why
+  the `smashable` mode (which skips adoption) exists.
+
+### Fixed — characters & V Bloods excluded from spawnable objects
+
+- `CHAR_*` units / V Bloods could appear in a player's unlocked list and be selected
+  to spawn (they carry `TilePosition`, so they passed the positive placement filter,
+  and stale entries persisted from an older, looser catalog). Now: the unit/V-Blood
+  exclusion is **component-based** (`Movement` **or** `VBloodConsumeSource`, alongside
+  the existing `CHAR_`/`AB_`/… name families), `.uriel spawn` **refuses any GUID that
+  isn't a real placeable object** even if unlocked (and prunes that stale unlock), and
+  the unlocked list **self-heals** — `DescribeUnlocks` / `api unlocked` drop non-object
+  GUIDs from `player_unlocks.json` on first view. The discovery-on-death path was
+  already safe (it guards on `IsDiscoverableGuid`).
+
+### Fixed — BloodCraftHub object catalog/unlocked lists now populate
+
+- `.uriel api catalog` / `.uriel api unlocked` returned nothing while `.uriel api
+  version` worked. The paged commands built a whole page (header + rows +
+  `[URIEL:end]`) as one `\n`-joined `ctx.Reply`, but a System-chat message is **one**
+  wire line and BCH (like Beelzebub) doesn't split on `\n` — so only the header parsed
+  and every row was dropped. Each `[URIEL:*]` line is now emitted as its **own**
+  `ctx.Reply`, matching the proven Beelzebub pattern. No wire-shape change (ApiVersion
+  stays 1, no BCH change needed); page size raised 3 → 20 now that the per-page byte
+  cap no longer applies per line.
+
+### Docs
+
+- Recorded the stair clan-ownership investigation (swapped stairs are confirmed
+  castle-owned, not caster-owned) and a shelved feasibility study for building below
+  the first floor (`docs/features/BASEMENT_BUILDING.md` — not possible server-side;
+  terrain + camera are client-only). Updated the BCH integration handoff (spawn flag
+  grammar, the `here`/`nearest` placement rule, and the catalog-wire fix).
+
 ## [0.16.0] - 2026-06-08
 
 ### Fixed — Object Spawning: cross-session management & chain-object removal

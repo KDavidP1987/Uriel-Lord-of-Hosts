@@ -38,13 +38,17 @@ internal static class ApiCommands
     public static void Catalog(ChatCommandContext ctx, int page = 1)
     {
         if (!Ready(ctx)) return;
-        ctx.Reply(Core.ObjectSpawn.ApiCatalogPage(page));
+        // One ctx.Reply per wire line — BCH treats each System-chat message as a single [URIEL:*] line
+        // and does NOT split on '\n' (mirrors Beelzebub). Sending the page as one '\n'-joined block left
+        // the [URIEL:object]/[URIEL:end] rows unparsed → "no rows" (handoff §6 P0).
+        foreach (var line in Core.ObjectSpawn.ApiCatalogPage(page)) ctx.Reply(line);
     }
 
     [Command("unlocked", description: "BCH: your unlocked prefabs + collection percentage (paged). Usage: .uriel api unlocked [page]")]
     public static void Unlocked(ChatCommandContext ctx, int page = 1)
     {
         if (!Ready(ctx)) return;
-        ctx.Reply(Core.ObjectSpawn.ApiUnlockedPage(ctx.Event.User.PlatformId, page));
+        // One ctx.Reply per wire line (see Catalog above).
+        foreach (var line in Core.ObjectSpawn.ApiUnlockedPage(ctx.Event.User.PlatformId, page)) ctx.Reply(line);
     }
 }

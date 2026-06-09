@@ -105,6 +105,19 @@ internal sealed class PlayerUnlockService
         return true;
     }
 
+    /// <summary>Drop any unlocked GUIDs that fail <paramref name="keep"/> — used to scrub stale
+    /// unlocks that are no longer valid placeable objects (e.g. CHAR_/V Blood GUIDs persisted by an
+    /// older, looser catalog filter). Returns the number removed; persists only if something changed.</summary>
+    public int PruneUnlocked(ulong steamId, Func<int, bool> keep)
+    {
+        if (!_unlocks.TryGetValue(steamId, out var set) || set.Count == 0) return 0;
+        int before = set.Count;
+        set.RemoveWhere(g => !keep(g));
+        int removed = before - set.Count;
+        if (removed > 0) SaveSync();
+        return removed;
+    }
+
     public IReadOnlyCollection<int> GetUnlocked(ulong steamId) =>
         _unlocks.TryGetValue(steamId, out var set) ? set : (IReadOnlyCollection<int>)Array.Empty<int>();
 

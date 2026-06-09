@@ -3,6 +3,28 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.17.0 (2026-06-08)
+
+- **New: choose how a spawned object can be destroyed.** Add a flag when you spawn:
+  `breakable` (raids/decay can destroy it), `smashable` (you can destroy it by hand
+  too), or leave it `indestructible` (the default). Example:
+  `.uriel spawn <object> 0 smashable`.
+- **New: `respawn` flag.** A spawned object set to respawn automatically comes back
+  after it's destroyed — until its castle is gone or you `.uriel despawn` it. Great
+  for decor you want to "stick." Admin switch: `ObjectSpawn.RespawnEnabled`
+  (+ `RespawnPollSeconds`).
+- **New: place at YOUR location with `here`.** `.uriel spawn <object> 0 here` (or
+  `.uriel move here`) drops the object where you're standing instead of where the
+  cursor points — handy when a UI panel has your aim pointing off into space.
+- **Fix: breakable / indestructible now actually work.** Previously the setting did
+  nothing on most world objects (and "indestructible" chests could even vanish on
+  their own after a while). Both now behave correctly.
+- **Fix: characters & bosses no longer show up as spawnable objects.** Any `CHAR_`
+  units / V Bloods that slipped into your unlock list from an older version are
+  cleaned out automatically, and they can no longer be spawned.
+- **Fix (BloodCraftHub):** the object catalog and your unlocked-objects list now load
+  in the companion UI (they previously came back empty).
+
 ## 0.16.0 (2026-06-08)
 
 - **Fix: spawned objects can be managed again after a relog or server restart.**

@@ -70,11 +70,17 @@ internal sealed class ObjectSpawnService
         // Item cost actually paid by a player at spawn (for '.uriel despawn' refund). 0 = free/admin.
         public int PaidCostItem { get; set; }
         public int PaidCostAmount { get; set; }
+        // Schema v3: tile rotation (so a destroyed object can be re-spawned the same way), auto-respawn,
+        // and player-breakable mode (the object skipped castle adoption so the OWNER can destroy it).
+        // Old records load these as 0/false — correct (no rotation stored, no respawn, normal adoption).
+        public int Rot { get; set; }
+        public bool RespawnOnDestroy { get; set; }
+        public bool PlayerBreakable { get; set; }
     }
 
     sealed class SaveFile
     {
-        public int SchemaVersion { get; set; } = 2;
+        public int SchemaVersion { get; set; } = 3;
         public List<SpawnRecord> Objects { get; set; } = new();
     }
 
@@ -196,7 +202,8 @@ internal sealed class ObjectSpawnService
     }
 
     void RegisterRecord(Entity e, bool indestructible, int territoryIndex, Entity heart, ulong bySteamId,
-                        int paidItem = 0, int paidAmount = 0)
+                        int paidItem = 0, int paidAmount = 0,
+                        int rot = 0, bool respawnOnDestroy = false, bool playerBreakable = false)
     {
         if (!e.TryGetComponent<TilePosition>(out var tp))
         {
@@ -214,6 +221,9 @@ internal sealed class ObjectSpawnService
             SpawnedAtUtc = DateTime.UtcNow.ToString("u"),
             PaidCostItem = paidItem,
             PaidCostAmount = paidAmount,
+            Rot = rot & 3,
+            RespawnOnDestroy = respawnOnDestroy,
+            PlayerBreakable = playerBreakable,
         };
         if (e.TryGetComponent<Translation>(out var tr))
         {
@@ -371,6 +381,75 @@ internal sealed class ObjectSpawnService
         if (changed) SaveSync();
         Core.Log.LogInfo($"[Uriel SPAWN] re-applied {restored} object(s); {orphaned} orphan(s) purged (castle gone); " +
                          $"{unresolved} not resolved this boot (KEPT — may be streaming in).");
+    }
+
+    // ============================================================ auto-respawn loop
+
+    /// <summary>Start the periodic auto-respawn poll (called once at boot, after ReapplySpawned).
+    /// No-op when disabled by config or when the tick driver isn't running.</summary>
+    public void StartRespawnLoop()
+    {
+        if (!Settings.ObjectSpawn_RespawnEnabled.Value) return;
+        if (!Tick.IsRunning) { Core.Log.LogWarning("[Uriel SPAWN] auto-respawn loop NOT started (tick driver unavailable)."); return; }
+        int seconds = Math.Max(5, Settings.ObjectSpawn_RespawnPollSeconds.Value);
+        Tick.RunRepeating(seconds * 60, RespawnTick); // frames ≈ seconds × server fps; approximate cadence is fine
+        Core.Log.LogInfo($"[Uriel SPAWN] auto-respawn loop started (~{seconds}s cadence).");
+    }
+
+    /// <summary>One poll: re-spawn every respawn-flagged object that is currently DESTROYED but whose
+    /// castle still stands. The "destroyed vs merely streamed-out" distinction is the safety crux — the
+    /// LiveIndex query is Disabled-included, so a streamed-out object still resolves; only a genuinely
+    /// gone entity resolves to Null. And we only respawn when the castle HEART still exists (region is
+    /// loaded / castle not destroyed), so a streamed-out region (heart also gone) never triggers a
+    /// duplicate, and a destroyed castle never resurrects its objects.</summary>
+    void RespawnTick()
+    {
+        if (!Settings.ObjectSpawn_RespawnEnabled.Value) return;
+        bool any = false;
+        foreach (var r in _records) if (r.RespawnOnDestroy) { any = true; break; }
+        if (!any) return;
+
+        var index = BuildLiveIndex();
+        int respawned = 0;
+        foreach (var r in new List<SpawnRecord>(_records))
+        {
+            if (!r.RespawnOnDestroy) continue;
+            if (index.Resolve(r) != Entity.Null) continue;                         // still present (incl. Disabled) → nothing to do
+            if (!r.HasHeart || !HeartExistsByTile(r.HeartTileX, r.HeartTileY)) continue; // castle gone / region not loaded → don't respawn
+            if (TryRespawnRecord(r)) respawned++;
+        }
+        if (respawned > 0) Core.Log.LogInfo($"[Uriel SPAWN] auto-respawned {respawned} destroyed object(s).");
+    }
+
+    /// <summary>Re-instantiate a destroyed respawn-record at its stored position/rotation/mode, re-using
+    /// the SAME record (so it keeps respawning and never duplicates). Returns false (and keeps the
+    /// record) if the prefab/plot can't be resolved this cycle — it simply retries next poll.</summary>
+    bool TryRespawnRecord(SpawnRecord r)
+    {
+        try
+        {
+            var pos = new float3(r.PosX, r.PosY, r.PosZ);
+            if (pos.Equals(default(float3))) return false; // pre-v2 record without a stored position — can't place
+            if (!TryResolvePlot(pos, out Entity heart, out int territory)) return false;
+            var guidMap = Core.PrefabCollectionSystem._PrefabLookupMap.GuidToEntityMap;
+            if (!guidMap.TryGetValue(new PrefabGUID(r.PrefabGuid), out Entity prefab) || !prefab.Exists()) return false;
+
+            Entity e = ExecuteSpawn(prefab, pos, r.Rot, r.Indestructible, heart, out _, r.PlayerBreakable);
+            if (e == Entity.Null) return false;
+
+            // Re-point the record at the fresh entity's tile (position is identical so it usually matches,
+            // but keep it exact); flags + ownership on the record are preserved.
+            if (e.TryGetComponent<TilePosition>(out var tp)) { r.TileX = tp.Tile.x; r.TileY = tp.Tile.y; }
+            r.TerritoryIndex = territory;
+            SaveSync();
+            Core.Log.LogInfo($"[Uriel SPAWN] respawned {new PrefabGUID(r.PrefabGuid).GetPrefabName()} at ({pos.x:F1},{pos.y:F1},{pos.z:F1}).");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Core.Log.LogWarning($"[Uriel SPAWN] respawn of {new PrefabGUID(r.PrefabGuid).GetPrefabName()} failed: {ex.Message}");
+            return false;
+        }
     }
 
     // ============================================================ castle territory / ownership
@@ -572,7 +651,39 @@ internal sealed class ObjectSpawnService
     {
         foreach (var p in NonObjectPrefixes)
             if (name.StartsWith(p, StringComparison.OrdinalIgnoreCase)) return true;
-        return prefab.Has<Movement>();
+        // Component backstop — catches units the name filter could miss. EVERY character/NPC carries
+        // Movement (verified across the CHAR_* dump: all 532 have it, alongside TilePosition which
+        // otherwise lets them pass IsPlaceableObject), and V Bloods additionally carry VBloodConsumeSource.
+        // A real placeable world object has neither. This is what makes "no characters/V Bloods" robust
+        // even for a unit whose name doesn't start with CHAR_.
+        return prefab.Has<Movement>() || prefab.Has<VBloodConsumeSource>();
+    }
+
+    /// <summary>Structural "is this a real placeable WORLD object?" test for an arbitrary GUID — the
+    /// same families EnsureCatalog keeps (not a character/V Blood/ability/chain/debug/internal, and it
+    /// carries a placeable component). Deliberately IGNORES the reversible admin blocklist, so blocking
+    /// a prefab never deletes a player's unlock. Used to (a) refuse spawning a non-object that lingers in
+    /// an unlock list and (b) prune such stale unlocks.</summary>
+    bool IsRealPlaceableObject(int guid)
+    {
+        var pg = new PrefabGUID(guid);
+        var guidMap = Core.PrefabCollectionSystem._PrefabLookupMap.GuidToEntityMap;
+        if (!guidMap.TryGetValue(pg, out Entity prefab) || !prefab.Exists()) return false;
+        string name = pg.GetPrefabName();
+        if (IsDebugPrefab(name)) return false;
+        if (IsSpawnChainController(prefab)) return false;
+        if (IsNonObject(name, prefab)) return false;
+        if (!Settings.ObjectSpawn_IncludeCastleBuildables.Value && prefab.Has<BlueprintData>()) return false;
+        return IsPlaceableObject(prefab);
+    }
+
+    /// <summary>Scrub a player's unlocks of GUIDs that aren't real placeable objects (stale CHAR_/V Blood
+    /// entries from an older catalog filter). Cheap no-op once clean; logs when it removes anything.</summary>
+    void PruneStaleUnlocks(ulong steamId)
+    {
+        int removed = Core.PlayerUnlock.PruneUnlocked(steamId, IsRealPlaceableObject);
+        if (removed > 0)
+            Core.Log.LogInfo($"[Uriel SPAWN] pruned {removed} stale non-object unlock(s) (characters/V Bloods/etc.) for {steamId}.");
     }
 
     /// <summary>
@@ -845,6 +956,7 @@ internal sealed class ObjectSpawnService
     public string DescribeUnlocks(ulong steamId)
     {
         EnsureCatalog();
+        PruneStaleUnlocks(steamId);
         var guids = Core.PlayerUnlock.GetUnlocked(steamId);
         int discoverableTotal = _discoverableGuids.Count;
         int unlockedDiscoverable = 0;
@@ -950,33 +1062,46 @@ internal sealed class ObjectSpawnService
                $"chance={Settings.ObjectSpawn_DiscoveryChancePercent.Value} total={_placeable.Count} discoverable={_discoverableGuids.Count} blocked={_blocked.Count}";
     }
 
-    // 3 rows/page keeps each reply under the 512-byte VCF cap WITH the label=/cat= fields.
-    const int ApiPageSize = 3;
+    // Each wire line is emitted as its OWN ctx.Reply (one System-chat message per line) — BCH's
+    // [URIEL:*] reader (and the proven Beelzebub pattern it mirrors) treats one chat message as one
+    // wire line and does NOT split on '\n'. So these methods return a LIST of lines, never a single
+    // '\n'-joined block. (The old single-Reply block was why `api catalog`/`api unlocked` returned
+    // "nothing" while the single-line `api version` worked — BCH-handoff §6 P0, 2026-06-08.)
+    // Page size only has to keep EACH line under VCF's 509-char Reply cap (trivially true at any size,
+    // labels are short prefab-derived tokens); 20 rows/page keeps the full-catalog browse — hundreds
+    // of objects — to a sane number of round-trips (mirrors Beelzebub's 40-row catalog pages).
+    const int ApiPageSize = 20;
 
     /// <summary>`.uriel api catalog &lt;page&gt;` — the total prefab list available in-game (paged).
-    /// Row: [URIEL:object] guid= name= disc=0|1 label=&lt;humanized,wire-safe&gt; cat=&lt;category&gt;.</summary>
-    public string ApiCatalogPage(int page)
+    /// Returns one wire line per list entry (header + rows + end), each sent via its own ctx.Reply.
+    /// Row: [URIEL:object] guid= disc=0|1 label=&lt;humanized,wire-safe&gt; cat=&lt;category&gt;.</summary>
+    public List<string> ApiCatalogPage(int page)
     {
         EnsureCatalog();
         int total = _placeable.Count;
         int pages = Math.Max(1, (total + ApiPageSize - 1) / ApiPageSize);
         page = Math.Clamp(page, 1, pages);
-        var sb = new StringBuilder($"[URIEL:catalog] page={page}/{pages} total={total} discoverable={_discoverableGuids.Count}");
+        var lines = new List<string>
+        {
+            $"[URIEL:catalog] page={page}/{pages} total={total} discoverable={_discoverableGuids.Count}"
+        };
         int count = 0;
         for (int i = (page - 1) * ApiPageSize; i < Math.Min(page * ApiPageSize, total); i++)
         {
             var c = _placeable[i];
-            sb.Append($"\n[URIEL:object] guid={c.Guid._Value} disc={(_discoverableGuids.Contains(c.Guid._Value) ? 1 : 0)} label={c.Label} cat={c.Cat}");
+            lines.Add($"[URIEL:object] guid={c.Guid._Value} disc={(_discoverableGuids.Contains(c.Guid._Value) ? 1 : 0)} label={c.Label} cat={c.Cat}");
             count++;
         }
-        sb.Append($"\n[URIEL:end] cmd=catalog page={page}/{pages} count={count}");
-        return Clamp(sb.ToString());
+        lines.Add($"[URIEL:end] cmd=catalog page={page}/{pages} count={count}");
+        return lines;
     }
 
-    /// <summary>`.uriel api unlocked &lt;steamId&gt; &lt;page&gt;` — a player's unlocked prefabs + collection %.</summary>
-    public string ApiUnlockedPage(ulong steamId, int page)
+    /// <summary>`.uriel api unlocked &lt;steamId&gt; &lt;page&gt;` — a player's unlocked prefabs + collection %.
+    /// Returns one wire line per list entry (header + rows + end), each sent via its own ctx.Reply.</summary>
+    public List<string> ApiUnlockedPage(ulong steamId, int page)
     {
         EnsureCatalog();
+        PruneStaleUnlocks(steamId);
         var guids = new List<int>(Core.PlayerUnlock.GetUnlocked(steamId));
         guids.Sort();
         int discoverableTotal = _discoverableGuids.Count;
@@ -987,7 +1112,10 @@ internal sealed class ObjectSpawnService
         int total = guids.Count;
         int pages = Math.Max(1, (total + ApiPageSize - 1) / ApiPageSize);
         page = Math.Clamp(page, 1, pages);
-        var sb = new StringBuilder($"[URIEL:unlocked] page={page}/{pages} steam={steamId} n={total} discoverable={discoverableTotal} pct={pct}");
+        var lines = new List<string>
+        {
+            $"[URIEL:unlocked] page={page}/{pages} steam={steamId} n={total} discoverable={discoverableTotal} pct={pct}"
+        };
         int count = 0;
         for (int i = (page - 1) * ApiPageSize; i < Math.Min(page * ApiPageSize, total); i++)
         {
@@ -995,11 +1123,11 @@ internal sealed class ObjectSpawnService
             string label, cat; int disc;
             if (_byGuid.TryGetValue(g, out var ce)) { label = ce.Label; cat = ce.Cat; disc = _discoverableGuids.Contains(g) ? 1 : 0; }
             else { label = SafeToken(Humanize(new PrefabGUID(g).GetPrefabName())); cat = "other"; disc = 0; }
-            sb.Append($"\n[URIEL:object] guid={g} disc={disc} label={label} cat={cat}");
+            lines.Add($"[URIEL:object] guid={g} disc={disc} label={label} cat={cat}");
             count++;
         }
-        sb.Append($"\n[URIEL:end] cmd=unlocked page={page}/{pages} count={count}");
-        return Clamp(sb.ToString());
+        lines.Add($"[URIEL:end] cmd=unlocked page={page}/{pages} count={count}");
+        return lines;
     }
 
     // ---- inventory cost helpers (charge the player's OWN inventory; castle shared-stash is a future enhancement) ----
@@ -1209,8 +1337,13 @@ internal sealed class ObjectSpawnService
     /// Spawn <paramref name="prefabRef"/> at the player's aim point (or feet), INSIDE the
     /// castle plot at that spot. Players may only place in a plot they own; admins, any plot;
     /// open world is refused. <paramref name="rotation"/> is tile rotation 0–3.
+    /// <paramref name="atFeet"/> forces placement at the PLAYER'S position instead of the aim
+    /// point — required when the command is fired from a BCH UI button, where the cursor sits on
+    /// the panel and the aim ray points outside the plot (the "can only place in a castle plot"
+    /// error). See the `here`/`nearest` token in ObjectCommands.Spawn.
     /// </summary>
-    public bool Spawn(Entity character, bool isAdmin, string prefabRef, int rotation, bool? breakable, out string message)
+    public bool Spawn(Entity character, bool isAdmin, string prefabRef, int rotation, bool? breakable,
+                      bool playerBreakable, bool respawn, bool atFeet, out string message)
     {
         if (!TryResolvePrefab(prefabRef, out PrefabGUID guid, out Entity prefab, out string name, out string err))
         {
@@ -1232,9 +1365,28 @@ internal sealed class ObjectSpawnService
             return false;
         }
 
-        // Position: aim point, falling back to the player's feet.
+        // Structural safety net: never spawn a character / V Blood / ability / internal prefab as an
+        // object, even if it lingers in the player's unlock list from an older catalog filter. (The
+        // spawned unit wouldn't persist as a placeable object anyway — it just vanishes.) Scrub the
+        // stale unlock so it stops showing in the list too.
+        if (!IsRealPlaceableObject(guid._Value))
+        {
+            if (Core.PlayerUnlock.Revoke(character.GetSteamId(), guid._Value))
+                Core.Log.LogInfo($"[Uriel SPAWN] removed stale non-object unlock {name}({guid._Value}) for {character.GetSteamId()}.");
+            message = $"{name} can't be spawned — it's a character, V Blood, ability, or internal prefab, " +
+                      "not a placeable world object. (If it was in your unlock list from an older version, it's now been removed.)";
+            return false;
+        }
+
+        // Position: the player's feet when atFeet (UI button / explicit `here`), otherwise the
+        // aim point, falling back to the player's feet when no aim is available.
         float3 pos;
-        if (character.TryGetComponent<EntityAimData>(out var aim) && !aim.AimPosition.Equals(default(float3)))
+        if (atFeet)
+        {
+            if (!PublicStorageService.TryGetCharacterPosition(character, out pos))
+            { message = "Could not read your position."; return false; }
+        }
+        else if (character.TryGetComponent<EntityAimData>(out var aim) && !aim.AimPosition.Equals(default(float3)))
             pos = aim.AimPosition;
         else if (PublicStorageService.TryGetCharacterPosition(character, out var cp))
             pos = cp;
@@ -1269,10 +1421,15 @@ internal sealed class ObjectSpawnService
         }
 
         bool indestructible = !(breakable ?? !Settings.ObjectSpawn_Indestructible.Value);
+        // 'smashable'/'respawn' only make sense for a breakable object: an indestructible one can't be
+        // destroyed (so nothing to respawn) and stays castle-adopted (so player-breakable is moot).
+        if (indestructible) { playerBreakable = false; respawn = false; }
+        if (respawn && !Settings.ObjectSpawn_RespawnEnabled.Value)
+        { message = "Auto-respawn is disabled on this server (ObjectSpawn.RespawnEnabled)."; return false; }
 
         try
         {
-            Entity e = ExecuteSpawn(prefab, pos, rotation & 3, indestructible, heart, out string adoptNote);
+            Entity e = ExecuteSpawn(prefab, pos, rotation & 3, indestructible, heart, out string adoptNote, playerBreakable);
             if (e == Entity.Null) { message = $"Failed to spawn {name} (prefab did not resolve)."; return false; }
 
             // Charge the player only AFTER a successful spawn (affordability was checked above).
@@ -1288,10 +1445,16 @@ internal sealed class ObjectSpawnService
                 }
             }
 
-            RegisterRecord(e, indestructible, territory, heart, character.GetSteamId(), paidItem, paidAmount);
-            Core.Log.LogInfo($"[Uriel SPAWN] {name}({guid._Value}) at ({pos.x:F1},{pos.y:F1},{pos.z:F1}) rot={rotation & 3} immortal={indestructible} territory={territory} cost={paidAmount}x{paidItem}. {adoptNote}");
+            RegisterRecord(e, indestructible, territory, heart, character.GetSteamId(), paidItem, paidAmount,
+                           rotation & 3, respawn, playerBreakable);
+            Core.Log.LogInfo($"[Uriel SPAWN] {name}({guid._Value}) at ({pos.x:F1},{pos.y:F1},{pos.z:F1}) rot={rotation & 3} immortal={indestructible} playerBreakable={playerBreakable} respawn={respawn} territory={territory} cost={paidAmount}x{paidItem}. {adoptNote}");
             string costNote = paidAmount > 0 ? $" Paid {paidAmount}x {new PrefabGUID(paidItem).GetPrefabName()}." : "";
-            message = $"Spawned {name} ({(indestructible ? "indestructible" : "breakable")}, rot {rotation & 3}).{costNote} {adoptNote} " +
+            string whereNote = atFeet ? " at your location" : "";
+            string mode = indestructible ? "indestructible"
+                        : playerBreakable ? "breakable by anyone (you included)"
+                        : "breakable by raid/decay";
+            string respawnNote = respawn ? " Auto-respawns when destroyed (until the castle is gone or you '.uriel despawn' it)." : "";
+            message = $"Spawned {name}{whereNote} ({mode}, rot {rotation & 3}).{costNote}{respawnNote} {adoptNote} " +
                       "Manage it with '.uriel move' / '.uriel rotate' / '.uriel despawn'.";
             return true;
         }
@@ -1303,7 +1466,7 @@ internal sealed class ObjectSpawnService
         }
     }
 
-    Entity ExecuteSpawn(Entity prefab, float3 pos, int rot, bool indestructible, Entity heart, out string adoptNote)
+    Entity ExecuteSpawn(Entity prefab, float3 pos, int rot, bool indestructible, Entity heart, out string adoptNote, bool playerBreakable = false)
     {
         adoptNote = "";
         if (!prefab.Exists())
@@ -1320,7 +1483,14 @@ internal sealed class ObjectSpawnService
         // vanilla selection needs the heart to REGISTER the piece via the placement pipeline,
         // which component edits can't reproduce (confirmed live). World objects are managed by
         // '.uriel move'/'.uriel rotate'/'.uriel despawn' instead.
-        if (heart.Exists())
+        //
+        // playerBreakable SKIPS adoption on purpose: copying the castle Team makes the object friendly
+        // to its owner, which is exactly what stops the owner weapon-smashing it (vanilla castle
+        // protection). Leaving it un-adopted keeps it a plain destructible world object the owner CAN
+        // hit. Ownership/management still work — '.uriel despawn'/'move' resolve ownership from the
+        // object's POSITION (the territory's heart), not its components — and the spawn RECORD still
+        // stores the heart tile for orphan-purge + auto-respawn.
+        if (heart.Exists() && !playerBreakable)
         {
             if (!e.Has<CastleHeartConnection>()) Core.EntityManager.AddComponent<CastleHeartConnection>(e);
             e.With((ref CastleHeartConnection c) => c.CastleHeartEntity = heart);
@@ -1329,22 +1499,51 @@ internal sealed class ObjectSpawnService
             if (heart.TryGetComponent<UserOwner>(out var owner)) e.AddOrSet(owner);
             adoptNote = "Adopted into the castle.";
         }
+        else if (playerBreakable)
+        {
+            adoptNote = "Placed un-owned so you can break it yourself.";
+        }
 
-        // Indestructibility: Immortal + decay-proof, or explicitly breakable. (On a REAL object
-        // — not a chain — Immortal holds, confirmed live on TM_GloomRot_Laboratory_Table04.)
+        // Indestructibility is governed by TWO independent mechanisms, and a world object can use
+        // EITHER — so we must drive BOTH (audited 2026-06-08): furniture (TM_GloomRot_Laboratory_*)
+        // responds to `Immortal`, while world chests / resource objects have NO native `Immortal` and
+        // are governed by the HEALTH path — `Health` + `HealthConstants.DestroyOnDeath` + a
+        // `DestroyAfterDuration` auto-despawn timer (~1200s). Toggling only `Immortal` was a no-op on
+        // those (the cause of "breakable still invulnerable" AND "indestructible chest vanished").
         if (indestructible)
         {
             e.AddOrSet(new Immortal { IsImmortal = true });
             if (e.Has<CastleDecayAndRegen>()) e.With((ref CastleDecayAndRegen d) => d.CanDieFromDecay = false);
             else e.AddOrSet(new CastleDecayAndRegen { CanDieFromDecay = false });
+            // Health path: stop death-on-zero and the auto-despawn timer so it truly persists.
+            if (e.Has<HealthConstants>()) e.With((ref HealthConstants hc) => hc.DestroyOnDeath = false);
+            StripAutoDestroyTimers(e);
         }
-        else if (e.Has<Immortal>())
+        else
         {
-            e.With((ref Immortal im) => im.IsImmortal = false);
+            // Breakable: clear any Immortal we (or the prefab) set, and let the Health path destroy it
+            // on death. Also strip the prefab auto-despawn timer so a "breakable" object doesn't simply
+            // vanish on its own ~1200s clock — it follows vanilla raid/decay rules instead, and the
+            // owner removes it with '.uriel despawn'. NOTE: while ADOPTED into the castle (owner team),
+            // V Rising blocks the OWNER from weapon-smashing it — that's vanilla castle protection, not
+            // an Immortal flag (raiders/enemies and decay can still destroy it).
+            if (e.Has<Immortal>()) e.With((ref Immortal im) => im.IsImmortal = false);
+            if (e.Has<HealthConstants>()) e.With((ref HealthConstants hc) => hc.DestroyOnDeath = true);
+            StripAutoDestroyTimers(e);
         }
 
         PublicStorageService.ForceResync(e);
         return e;
+    }
+
+    /// <summary>Remove the prefab's auto-despawn timers so a spawned object doesn't vanish on its own.
+    /// World pickups/chests ship a <c>DestroyAfterDuration</c> (~1200s) and sometimes a <c>LifeTime</c>;
+    /// neither belongs on a placed castle object (indestructible OR breakable — breakable still follows
+    /// raid/decay rules, it just shouldn't evaporate on a hidden clock).</summary>
+    static void StripAutoDestroyTimers(Entity e)
+    {
+        if (e.Has<DestroyAfterDuration>()) Core.EntityManager.RemoveComponent<DestroyAfterDuration>(e);
+        if (e.Has<LifeTime>()) Core.EntityManager.RemoveComponent<LifeTime>(e);
     }
 
     /// <summary>Write position + tile rotation onto an object. World→tile is
@@ -1409,10 +1608,12 @@ internal sealed class ObjectSpawnService
         return true;
     }
 
-    /// <summary>Move the nearest spawned object to your aim point (respawn-based — these objects
-    /// render from baked static batches; an in-place edit risks the stair invisible-until-restart
-    /// bug). Destination must be inside a plot you own (admins: any plot).</summary>
-    public bool Move(Entity character, bool isAdmin, out string message)
+    /// <summary>Move the nearest spawned object to your aim point — or to your own location when
+    /// <paramref name="toFeet"/> (the `here`/`nearest` token; required from a BCH UI button, where
+    /// the cursor is on the panel and the aim ray points outside the plot). Respawn-based — these
+    /// objects render from baked static batches; an in-place edit risks the stair
+    /// invisible-until-restart bug. Destination must be inside a plot you own (admins: any plot).</summary>
+    public bool Move(Entity character, bool isAdmin, bool toFeet, out string message)
     {
         if (!PublicStorageService.TryGetCharacterPosition(character, out float3 feet))
         { message = "Could not read your position."; return false; }
@@ -1423,16 +1624,22 @@ internal sealed class ObjectSpawnService
                       "(Stand near it.)";
             return false;
         }
-        if (!(character.TryGetComponent<EntityAimData>(out var aim) && !aim.AimPosition.Equals(default(float3))))
-        { message = "Aim where you want it, then run '.uriel move'."; return false; }
 
-        if (!CheckPlacement(character, isAdmin, aim.AimPosition, "moved", out Entity heart, out int territory, out string gateErr))
+        float3 dest;
+        if (toFeet)
+            dest = feet;
+        else if (character.TryGetComponent<EntityAimData>(out var aim) && !aim.AimPosition.Equals(default(float3)))
+            dest = aim.AimPosition;
+        else
+        { message = "Aim where you want it, then run '.uriel move' — or use '.uriel move here' to bring it to your location."; return false; }
+
+        if (!CheckPlacement(character, isAdmin, dest, "moved", out Entity heart, out int territory, out string gateErr))
         { message = gateErr; return false; }
 
         string name = target.GetPrefabGuid().GetPrefabName();
-        if (!RespawnAt(target, rec, aim.AimPosition, CurrentRot(target), heart, territory, out _, out string err)) { message = err; return false; }
-        Core.Log.LogInfo($"[Uriel SPAWN] moved {name} to ({aim.AimPosition.x:F1},{aim.AimPosition.y:F1},{aim.AimPosition.z:F1}).");
-        message = $"Moved {name} to your aim point.";
+        if (!RespawnAt(target, rec, dest, CurrentRot(target), heart, territory, out _, out string err)) { message = err; return false; }
+        Core.Log.LogInfo($"[Uriel SPAWN] moved {name} to ({dest.x:F1},{dest.y:F1},{dest.z:F1}){(toFeet ? " [at player]" : "")}.");
+        message = toFeet ? $"Moved {name} to your location." : $"Moved {name} to your aim point.";
         return true;
     }
 
@@ -1469,7 +1676,11 @@ internal sealed class ObjectSpawnService
         if (!guidMap.TryGetValue(guid, out Entity prefab) || !prefab.Exists())
         { error = "Could not re-resolve the object's prefab."; return false; }
 
-        bool indestructible = target.TryGetComponent<Immortal>(out var im) && im.IsImmortal;
+        // Preserve the object's mode across a move/rotate re-spawn (fall back to a live Immortal probe
+        // only for a record-less legacy object).
+        bool playerBreakable = old?.PlayerBreakable ?? false;
+        bool respawn = old?.RespawnOnDestroy ?? false;
+        bool indestructible = old?.Indestructible ?? (target.TryGetComponent<Immortal>(out var im) && im.IsImmortal);
         ulong by = old?.SpawnedBySteamId ?? 0;
         int paidItem = old?.PaidCostItem ?? 0;       // a move/rotate re-spawns — never re-charge
         int paidAmount = old?.PaidCostAmount ?? 0;
@@ -1478,9 +1689,9 @@ internal sealed class ObjectSpawnService
         {
             if (old != null) _records.Remove(old);
             DestroySpawned(target);
-            Entity e = ExecuteSpawn(prefab, pos, rot, indestructible, heart, out _);
+            Entity e = ExecuteSpawn(prefab, pos, rot, indestructible, heart, out _, playerBreakable);
             if (e == Entity.Null) { error = "Re-spawn failed (prefab did not resolve)."; SaveSync(); return false; }
-            RegisterRecord(e, indestructible, territory, heart, by, paidItem, paidAmount);
+            RegisterRecord(e, indestructible, territory, heart, by, paidItem, paidAmount, rot, respawn, playerBreakable);
             result = e;
             return true;
         }

@@ -37,11 +37,18 @@ shared or changed server-wide on your behalf.
 
 Bring **world objects the build menu never offers** into your castle — resource
 nodes, world chests, breakable crates and urns, and decorative props from across
-the map (GloomRot, Cursed Forest, dungeons, ruins). Spawn one at your aim point
-inside your own plot; it's **indestructible and decay-proof by default**, and you
+the map (GloomRot, Cursed Forest, dungeons, ruins). Spawn one at your aim point —
+or **at your own location** with the `here` flag (handy from a UI button) — inside
+your own plot; it's **indestructible and decay-proof by default**, and you
 move/rotate/remove it with `.uriel move` / `.uriel rotate` / `.uriel despawn`.
 Everything you place persists across restarts and is cleaned up automatically if
 its castle is ever destroyed.
+
+**Choose how durable it is** with optional spawn flags: `breakable` (raids and
+decay can destroy it), `smashable` (you can destroy it by hand too), or
+`respawn` (it automatically comes back after being destroyed — until its castle
+is gone or you `.uriel despawn` it). Mix them, e.g. `.uriel spawn <object> 0
+smashable respawn`.
 
 **Collect them by playing (Discovery mode).** You unlock an object by **destroying
 one in the world** — chop a tree, smash a crate, break an ore vein — with an
@@ -150,8 +157,8 @@ aiming — handy when a menu or UI panel has your aim ray pointing elsewhere
 
 | Command | What it does |
 |---|---|
-| `.uriel spawn <name\|guid> [rot 0-3] [breakable]` | Place an object you've unlocked at your aim point (indestructible & decay-proof by default) |
-| `.uriel move` / `.uriel rotate [0-3]` / `.uriel despawn` | Move / turn / remove the nearest object you spawned |
+| `.uriel spawn <name\|guid> [rot 0-3] [flags…]` | Place an object you've unlocked at your aim point. Flags (any order, after the rotation): `breakable` (raid/decay), `smashable` (you can break it too), `respawn` (auto-returns until castle gone / despawned), `here` (place at YOUR location), `indestructible` (default) |
+| `.uriel move [here]` / `.uriel rotate [0-3]` / `.uriel despawn` | Move (to your aim, or `here` = your location) / turn / remove the nearest object you spawned |
 | `.uriel unlocks` | Your collected objects + collection % |
 | `.uriel catalog [page]` | Browse the full world-object catalog |
 | `.uriel findprefab <text>` | Search objects by name |
@@ -240,7 +247,9 @@ Config changes take effect on server restart.
 | ObjectSpawn | NonDestructibleUnlock | `Off` | How non-destructible objects unlock: `Off`/`Collection`/`FinalBoss`/`AllBosses` |
 | ObjectSpawn | IncludeCastleBuildables | `false` | Include the normal build-menu pieces in the catalog (off = world objects only) |
 | ObjectSpawn | PrefabCostItem / PrefabCostStack | `0` / `0` | Item + amount a player pays to build one object (0 = free) |
-| ObjectSpawn | Indestructible | `true` | Spawned objects are immortal + decay-proof (turn off on PvP) |
+| ObjectSpawn | Indestructible | `true` | Spawned objects are immortal + decay-proof by default (per-spawn `breakable`/`smashable` flags override; turn off globally for PvP) |
+| ObjectSpawn | RespawnEnabled | `true` | Master switch for the `respawn` flag (auto-return destroyed objects until the castle is gone) |
+| ObjectSpawn | RespawnPollSeconds | `30` | How often (seconds, min 5) the respawn check runs |
 | ObjectSpawn | *(more)* | — | CollectionEnabled, BossUnlocksEnabled, DiscoveryNotify, RefundOnRemove, PurgeOrphansOnBoot — see the generated `.cfg` |
 | PublicStorage | Enabled | `true` | Master switch for chest sharing |
 | PublicStorage | PrisonEnabled | `true` | Independently allow prison-cell sharing |

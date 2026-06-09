@@ -30,16 +30,38 @@ internal static class ObjectCommands
         return true;
     }
 
-    [Command("spawn", description: "Spawn a prefab INSIDE the castle plot you're in, at your aim point. Usage: .uriel spawn <name|guid> [rot 0-3] [breakable]. Indestructible by default. Players: own plot only; admins: any plot.")]
-    public static void Spawn(ChatCommandContext ctx, string prefab, int rotation = 0, string flag = null)
+    [Command("spawn", description: "Spawn a prefab in the castle plot you're in. Flags (any order, AFTER the rotation slot): 'breakable' (raid/decay can destroy it), 'smashable' (you can destroy it too), 'respawn' (auto-comes-back until the castle's gone or you despawn it), 'here'/'nearest' (place at YOUR location — use this from a UI button), 'indestructible'. Default indestructible. Usage: .uriel spawn <name|guid> [rot 0-3] [flags…]. Players: own plot only; admins: any plot.")]
+    public static void Spawn(ChatCommandContext ctx, string prefab, int rotation = 0,
+                             string f1 = null, string f2 = null, string f3 = null, string f4 = null)
     {
         if (!Ready(ctx)) return;
         bool? breakable = null;
-        if ("breakable".Equals(flag?.Trim(), StringComparison.OrdinalIgnoreCase)) breakable = true;
-        else if ("indestructible".Equals(flag?.Trim(), StringComparison.OrdinalIgnoreCase)) breakable = false;
-        Core.ObjectSpawn.Spawn(ctx.Event.SenderCharacterEntity, ctx.Event.User.IsAdmin, prefab, rotation, breakable, out string message);
+        bool playerBreakable = false, respawn = false, atFeet = false;
+        foreach (var raw in new[] { f1, f2, f3, f4 })
+        {
+            string f = raw?.Trim();
+            if (string.IsNullOrEmpty(f)) continue;
+            if ("breakable".Equals(f, StringComparison.OrdinalIgnoreCase)) breakable = true;
+            else if ("indestructible".Equals(f, StringComparison.OrdinalIgnoreCase)) breakable = false;
+            else if ("smashable".Equals(f, StringComparison.OrdinalIgnoreCase)
+                  || "smash".Equals(f, StringComparison.OrdinalIgnoreCase)
+                  || "playerbreakable".Equals(f, StringComparison.OrdinalIgnoreCase)) { breakable = true; playerBreakable = true; }
+            else if ("respawn".Equals(f, StringComparison.OrdinalIgnoreCase)) respawn = true;
+            else if (IsAtFeetToken(f)) atFeet = true;
+            // unknown tokens are ignored (forward-compatible)
+        }
+        Core.ObjectSpawn.Spawn(ctx.Event.SenderCharacterEntity, ctx.Event.User.IsAdmin, prefab, rotation,
+                               breakable, playerBreakable, respawn, atFeet, out string message);
         ctx.Reply(message);
     }
+
+    // "Use my own position, not the cursor/aim" token — for UI-button relays (the cursor is on the
+    // panel, so the aim ray points outside the plot). 'nearest' mirrors the storage/stair convention;
+    // 'here'/'me' are friendlier aliases for chat.
+    static bool IsAtFeetToken(string s)
+        => "here".Equals(s, StringComparison.OrdinalIgnoreCase)
+        || "nearest".Equals(s, StringComparison.OrdinalIgnoreCase)
+        || "me".Equals(s, StringComparison.OrdinalIgnoreCase);
 
     [Command("despawn", description: "Remove the nearest object you spawned (aim at it or stand near it). Usage: .uriel despawn")]
     public static void Despawn(ChatCommandContext ctx)
@@ -49,11 +71,12 @@ internal static class ObjectCommands
         ctx.Reply(message);
     }
 
-    [Command("move", description: "Move the nearest object you spawned to your aim point. Stand near the object, aim where you want it, then run. Usage: .uriel move")]
-    public static void Move(ChatCommandContext ctx)
+    [Command("move", description: "Move the nearest object you spawned to your aim point — or to YOUR location with 'here' (use this from a UI button). Stand near the object; aim where you want it (or pass 'here'), then run. Usage: .uriel move [here]")]
+    public static void Move(ChatCommandContext ctx, string flag = null)
     {
         if (!Ready(ctx)) return;
-        Core.ObjectSpawn.Move(ctx.Event.SenderCharacterEntity, ctx.Event.User.IsAdmin, out string message);
+        bool toFeet = IsAtFeetToken(flag?.Trim());
+        Core.ObjectSpawn.Move(ctx.Event.SenderCharacterEntity, ctx.Event.User.IsAdmin, toFeet, out string message);
         ctx.Reply(message);
     }
 

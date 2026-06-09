@@ -83,8 +83,8 @@ be built/decorated with — beyond the standard build menu. Two object worlds:
 ### Admin (Phase 1)
 | Command | Does |
 |---|---|
-| `.uriel spawn <prefab> [rot]` | Spawn a prefab (name fragment or GUID int) at your aim point (or feet), adopted by the castle you're in. `rot` 0–3 = tile rotation. Indestructible + decay-proof by default. Spawn-chain controllers are refused (spawn the real object). |
-| `.uriel move` | Move the nearest session-spawned object to your aim point (respawn-based). Stand near it, aim, run. |
+| `.uriel spawn <prefab> [rot] [breakable] [here]` | Spawn a prefab (name fragment or GUID int) at your aim point, adopted by the castle you're in. **`here` (aliases `nearest`/`me`) places at YOUR location instead of the cursor** — use this from a BCH UI button, where the cursor sits on the panel and the aim ray lands outside the plot ("…can only be spawned in a castle plot"). `rot` 0–3 = tile rotation. Indestructible + decay-proof by default. Spawn-chain controllers are refused (spawn the real object). |
+| `.uriel move [here]` | Move the nearest session-spawned object to your aim point (respawn-based). Stand near it, aim, run — **or pass `here`/`nearest` to bring it to YOUR location** (for UI buttons, same cursor reason as `spawn`). |
 | `.uriel rotate [0-3]` | Rotate the nearest session-spawned object — no arg turns 90°, 0–3 sets the tile rotation. |
 | `.uriel despawn` | Remove the nearest spawned object you're aiming at / standing near (cross-session). |
 | `.uriel spawnlist` | List the Uriel-spawned objects on the castle plot you're standing in. |
@@ -150,8 +150,10 @@ Discovery messages fire only on a NEW unlock (already-owned destructions are sil
 - **Spawn:** `Core.EntityManager.Instantiate(prefab)`; strip `Disabled`.
 - **Prefab resolve:** `Core.PrefabCollectionSystem._PrefabLookupMap.TryGetValue(guid, out e)`;
   names via the lookup map / `SpawnableNameToPrefabGuidDictionary`.
-- **Position:** aim via `EntityAimData.AimPosition`; else
-  `PublicStorageService.TryGetCharacterPosition`.
+- **Position:** the `here`/`nearest`/`me` token (spawn + move) forces the player's location via
+  `PublicStorageService.TryGetCharacterPosition` — needed for BCH UI-button relays (cursor on the
+  panel → aim ray outside the plot). Otherwise aim via `EntityAimData.AimPosition`, falling back to
+  the character position when no aim is available.
 - **World→tile:** `int2(floor(x*2)+6400, floor(z*2)+6400)`, `CompressedHeight=0`.
 - **Heart (Phase 1):** nearest placed castle tile's `CastleHeartConnection` →
   copy `CastleHeartEntity` + `Team`/`TeamReference`/`UserOwner`; fallback heart by
@@ -263,10 +265,51 @@ boost MaxHealth) instead.
 - **B. Catalog audit/filter — ✅ BUILT** (runtime component-signature classifier; see
   "Built in Session 2" above). Done at runtime over the spawnable dictionary, not by
   grepping the 23k dump — auto-tracks game patches.
-- **C. World-object indestructibility via Health path** (not Immortal) — ⏳ NEXT, needs
-  a live test on a REAL `TM_*` object: set `HealthConstants.DestroyOnDeath=false`,
-  remove/neutralize `DestroyAfterDuration`, raise `Health.MaxHealth`. Re-confirm
-  breakable path too. (Deferred until A/B are live-verified.)
+- **C. World-object indestructibility via Health path** (not Immortal) — ✅ BUILT (2026-06-08),
+  ⏳ live-validation pending. Audit confirmed `TM_GloomRot_Laboratory_*` AND `TM_WorldChest_*`
+  carry `Health` + `HealthConstants.DestroyOnDeath` + `DestroyAfterDuration` and **no native
+  `Immortal`** — so the old `Immortal`-only toggle was a no-op on world objects (the cause of the
+  reported "breakable came in invulnerable" and the latent "indestructible chest auto-despawns").
+  `ExecuteSpawn` now drives BOTH mechanisms:
+  - **Indestructible:** `Immortal{true}` + decay-off + `HealthConstants.DestroyOnDeath=false` +
+    `StripAutoDestroyTimers` (removes `DestroyAfterDuration`/`LifeTime`, so it can't die or evaporate).
+  - **Breakable:** clear `Immortal` + `DestroyOnDeath=true` + strip the auto-despawn timer, so it
+    follows vanilla raid/decay rules instead of vanishing on a hidden ~1200s clock.
+  ⚠️ **Owner-smash caveat:** while an object is ADOPTED into the castle (owner team), V Rising blocks
+  the OWNER from weapon-damaging it (vanilla castle protection — same reason you dismantle your own
+  furniture rather than hitting it). So "breakable" means *raiders/enemies + decay* can destroy it, and
+  the owner removes it with `.uriel despawn` — NOT that the owner can smash it by hand. Making breakable
+  objects owner-smashable would require NOT adopting them onto the owner's team (open design choice —
+  trade-off: no castle ownership, decays, anyone in the territory could damage/interact). `Health.MaxHealth`
+  boost intentionally skipped (not needed once death + auto-despawn are off).
+
+### Breakable modes + auto-respawn (2026-06-08) — ✅ BUILT, ⏳ live-validation pending
+
+Spawn flags (order-independent, AFTER the rotation slot): `.uriel spawn <prefab> [rot] [flags…]`.
+- **`breakable`** — raid/decay can destroy it; stays castle-owned, so the OWNER can't weapon-smash it
+  (vanilla castle protection). Removed via `.uriel despawn`.
+- **`smashable`** (aliases `smash`/`playerbreakable`) — breakable AND owner-destroyable. Implemented by
+  **skipping castle adoption** in `ExecuteSpawn` (`playerBreakable` param): the object never gets the
+  owner's `Team`/`CastleHeartConnection`, so the engine lets the owner damage it. Ownership/management
+  still work — `CallerOwnsObject` resolves the owner from the object's POSITION (territory heart), not its
+  components, and the spawn record still stores the heart tile for orphan-purge + respawn. Trade-off:
+  un-owned (decays, anyone in the territory can damage/interact).
+- **`respawn`** — the object auto-respawns after it's destroyed, **until the castle heart is gone or the
+  player `.uriel despawn`s it.** Config: `ObjectSpawn.RespawnEnabled` (master switch, default on) +
+  `ObjectSpawn.RespawnPollSeconds` (cadence, default 30, min 5).
+- `indestructible` — permanent (default unless `ObjectSpawn.Indestructible=false`). Forces `playerBreakable`
+  + `respawn` off (nothing to break/respawn).
+
+**Auto-respawn mechanism** (`ObjectSpawnService.RespawnTick` / `TryRespawnRecord`, polled via
+`Tick.RunRepeating`): the poll re-spawns every `RespawnOnDestroy` record whose entity is currently GONE
+but whose castle heart still resolves. The "destroyed vs streamed-out" distinction is the safety crux —
+`BuildLiveIndex` is Disabled-included, so a streamed-out object still resolves (only a truly destroyed one
+is `Entity.Null`), and respawn is gated on `HeartExistsByTile` (region loaded / castle alive). So: a
+streamed-out region (heart also absent) never duplicates, and a destroyed castle never resurrects its
+objects. The SAME record is re-used (re-pointed at the fresh entity's tile) — never a new record — so it
+keeps respawning and never duplicates. `SpawnRecord` schema bumped to **v3** (`Rot`, `RespawnOnDestroy`,
+`PlayerBreakable`; old records load these as 0/false). Mode survives `.uriel move`/`rotate` (preserved
+through `RespawnAt`).
 - **D. `EditableTileModel` graft** (Phase 1.5) to make real world objects build-editable. ⏳
 
 **✅ Session 2 live results (2026-06-08, items A+B deployed):**
@@ -535,10 +578,26 @@ the same `ObjectSpawnService` spawn/despawn already built, adding the access/cos
 
 Full prefab-dump audit of what survives the catalog filter (`Tiles.TileModel` is useless as a
 discriminator — CHAR_/AB_/MicroPOI/EH/TM all carry it 100%, so name-family is the signal).
-**Now excluded** (`NonObjectPrefixes` + Movement backstop): `CHAR_` units, `AB_` ability-effect
+**Now excluded** (`NonObjectPrefixes` + component backstop): `CHAR_` units, `AB_` ability-effect
 objects (spike traps, boss hazard spinners, continuous-damage areas), `GM_` debug props, `Liquid_`
 placement-rule objects, `Summon*`/`USB_`/`PrefabVariant` internals. **False-positive fixed:** dropped
 `"Dummy"` from the debug filter — it was wrongly excluding legit `TM_*_TargetDummy_*` decor.
+
+**Unit/V-Blood exclusion is component-based, not just name (2026-06-08).** Audit confirmed every
+`CHAR_*` prefab carries `TilePosition` (so it passes `IsPlaceableObject`) AND `Movement` (no real
+placeable object has it); V Bloods additionally carry `VBloodConsumeSource`. `IsNonObject` now backstops
+on `Movement || VBloodConsumeSource`, so a unit whose name doesn't start with `CHAR_` is still excluded.
+**Defense in depth for stale data:** `CHAR_`/V-Blood GUIDs that were unlocked under an *older, looser*
+filter still sat in `player_unlocks.json` and showed in the unlocked list / were spawnable (the unit
+spawned then immediately vanished — it's not a real object). Two guards close this:
+- **`.uriel spawn` refuses any GUID that isn't a real placeable object** (`IsRealPlaceableObject`, a
+  structural check that ignores the *reversible* admin blocklist so blocking never deletes an unlock),
+  and prunes that stale unlock on the spot.
+- **The unlocked list self-heals:** `DescribeUnlocks` / `ApiUnlockedPage` run `PruneStaleUnlocks` first
+  (`PlayerUnlockService.PruneUnlocked`), dropping non-object GUIDs from persistence on first view.
+The discovery-on-death path was already safe (the roll guards on `IsDiscoverableGuid`, so killing a
+`CHAR_` never unlocked it); the stale entries came from an older `grantall`/catalog, and `grantall` now
+grants only from the current (clean) `_placeableGuids`.
 **Kept (real world decor; admin can `.uriel block`):** `MicroPOI_*` (tree/flower clusters), `EH_*`
 (armor racks, cages), `TM_*_Invisible*` (legit invisible build pieces), `*_WithCollision` variants.
 **Known 1-off internals to block by GUID if undesired:** `TM_WarEvent_GateObject_DestroyTrigger`,

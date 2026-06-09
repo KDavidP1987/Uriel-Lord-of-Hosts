@@ -2,7 +2,10 @@
 
 **Status:** WORKING v0.14.x (2026-06-07) — **destroy + respawn, applies LIVE**
 (no restart). Validated on straight, curved, and wide shapes. `.uriel stairswap`
-is player-facing.
+is player-facing. **Open investigation (2026-06-08):** a possible clan
+ownership-transfer edge with swapped stairs — see "🔍 OPEN INVESTIGATION" below
+(awaiting a player's repro/logs; swapped stairs are confirmed castle-owned, not
+caster-owned).
 
 ## Final mechanism (v0.14.x): DESTROY + RESPAWN (live)
 
@@ -48,6 +51,60 @@ a genuinely NEW entity (new NetworkId) refreshes it. Hence destroy + respawn.
 the attachment/decay/pathing graph is restored minimally — refine if stairs
 float, decay, or mis-path. The legacy non-destructive identity swap
 (`Swap`/`ExecuteSwap`) remains in the file, unwired, as a fallback reference.
+
+## 🔍 OPEN INVESTIGATION (2026-06-08): clan ownership of swapped stairs
+
+**Trigger:** a server owner relayed that a player testing with friends hit "some
+issue with the stairs," vaguely "when leaving Claude/a clan or switching clans."
+No details/logs yet — they're trying to reproduce. The mod owner asked a precise
+sub-question: in a 4-person clan, when a non-owner member swaps a stair, the
+result must belong to the **castle**, not the individual.
+
+**Verdict on that sub-question — by design AND in code, the stair stays
+castle-owned, not caster-owned. The current implementation is correct here.**
+- `.uriel stairswap` runs the respawn path (`SwapViaRespawn` → `ExecuteRespawn`).
+  `Capture()` reads `Team` / `TeamReference` / `UserOwner` / `CastleHeartConnection`
+  **from the existing stair** (`StairSwapService.cs:505-508`) and `SpawnPiece()`
+  writes those same values onto the new entity (`:533-536`). So the new stair
+  inherits the castle's ownership, never the caster's.
+- The caster (`character`/`userEntity`) is used for exactly two things, neither of
+  which writes ownership: the **permission** check
+  (`PublicStorageService.CharacterControlsContainer` — caster's `Team` == the
+  castle heart's `Team`; clanmates share the clan team, so any member passes) and
+  the **DLC entitlement** check (`UserOwnsStyle`).
+
+**Open hypothesis for the friend's actual bug (UNCONFIRMED — needs his repro/logs).**
+Since v0.14.0 the swap **destroys the stair and spawns a fresh entity**, copying
+the castle's ownership directly rather than going through the vanilla placement/
+registration pipeline (it sets `CastleHeartConnection` + re-wires the fused/attach
+buffers by hand). If V Rising's castle-ownership **transfer** (a player leaving a
+clan, a clan disbanding, a castle being claimed) re-stamps team/owner only on the
+pieces the **castle heart has REGISTERED**, a respawned stair that isn't fully in
+that registry could be **skipped** by the transfer and keep the now-defunct team —
+surfacing as a foreign/"enemy" staircase inside the new owner's castle, or one
+nobody can dismantle/swap. That matches "stairs broke after leaving/switching clans."
+- Caveat that *weakens* the hypothesis: a respawned stair is a real
+  `BP_Castle_Stairs_*` instantiated from its prefab, so it carries the full
+  castle-building component set and *may* be auto-registered by the vanilla
+  systems (unlike a hand-spawned world object — see OBJECT_SPAWNING.md, where
+  setting `CastleHeartConnection` was proven NOT to register a piece with the
+  heart). Whether a stair respawn actually lands in the heart's building registry
+  is **untested**.
+
+**Decisive test to ask the friend for:** in the affected castle, does a stair he
+**SWAPPED** break after the clan change while an ordinary **never-swapped** vanilla
+stair in the same castle survives? Swapped-break + vanilla-survive isolates it to
+the respawn/registration path. Also capture: exact repro (who founded the castle,
+who swapped what, the precise clan action), the **server log** across the clan
+change (`[Uriel STAIRRESPAWN]` lines), and `.uriel stairstyles` aimed at a broken
+stair.
+
+**Candidate fix direction (hold until confirmed):** on respawn, re-assert ownership
+from the **live castle heart** (not the copied pre-swap values) AND ensure the new
+pieces are entered into the heart's building registry — so a later ownership
+transfer includes them. If registration proves unreachable (as with world objects),
+the fallback is a re-assert hook that re-stamps team/owner from the heart whenever a
+swapped stair is detected on a mismatched team.
 
 ### ⚠️ Correction (live test 2026-06-07): stairs are NOT MegaStatic
 

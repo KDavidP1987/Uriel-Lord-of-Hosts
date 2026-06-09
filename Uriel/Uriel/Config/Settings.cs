@@ -21,6 +21,8 @@ internal static class Settings
     public static ConfigEntry<float> ObjectSpawn_MaxTargetDistance { get; private set; }
     public static ConfigEntry<bool> ObjectSpawn_Indestructible { get; private set; }
     public static ConfigEntry<bool> ObjectSpawn_PurgeOrphansOnBoot { get; private set; }
+    public static ConfigEntry<bool> ObjectSpawn_RespawnEnabled { get; private set; }
+    public static ConfigEntry<int> ObjectSpawn_RespawnPollSeconds { get; private set; }
     public static ConfigEntry<bool> ObjectSpawn_IncludeCastleBuildables { get; private set; }
     // Phase 2 — player access (mode + discovery + cost)
     public static ConfigEntry<bool> ObjectSpawn_CollectionEnabled { get; private set; }
@@ -108,6 +110,20 @@ internal static class Settings
             "(the castle heart no longer exists — destroyed or fully decayed). This keeps a destroyed " +
             "castle from leaving permanent, indestructible orphan objects floating in the world. Turn " +
             "OFF to keep such objects until an admin removes them manually ('.uriel purgeplot').");
+
+        ObjectSpawn_RespawnEnabled = config.Bind(
+            "ObjectSpawn", "RespawnEnabled", true,
+            "Master switch for AUTO-RESPAWN: objects spawned with the 'respawn' flag " +
+            "('.uriel spawn <prefab> breakable respawn') automatically come back after they're destroyed " +
+            "(by a raid, decay, or — if 'smashable' — the player), as long as the castle still stands and " +
+            "the object wasn't '.uriel despawn'ed. Turn OFF to disable the respawn loop server-wide " +
+            "(existing respawn-flagged objects simply stay gone once destroyed).");
+
+        ObjectSpawn_RespawnPollSeconds = config.Bind(
+            "ObjectSpawn", "RespawnPollSeconds", 30,
+            "How often (seconds, approximate) the auto-respawn loop checks for destroyed respawn-flagged " +
+            "objects and brings them back. Lower = snappier respawns but more frequent territory scans; " +
+            "30 is a good balance for decor. Clamped to a 5s minimum.");
 
         ObjectSpawn_CollectionEnabled = config.Bind(
             "ObjectSpawn", "CollectionEnabled", true,

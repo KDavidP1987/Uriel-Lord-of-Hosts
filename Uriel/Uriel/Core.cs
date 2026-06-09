@@ -76,6 +76,9 @@ internal static class Core
             // and purge orphans whose castle is gone (config-gated). Query-heavy, so guarded.
             try { ObjectSpawn.ReapplySpawned(); }
             catch (System.Exception ex) { Log.LogWarning($"[Uriel SPAWN] boot re-apply failed: {ex}"); }
+            // Periodic auto-respawn for objects spawned with the 'respawn' flag (config-gated).
+            try { ObjectSpawn.StartRespawnLoop(); }
+            catch (System.Exception ex) { Log.LogWarning($"[Uriel SPAWN] respawn loop start failed: {ex}"); }
             PublicStorage = new PublicStorageService();
             PublicStorage.Load();
             // Placement teams are restored from the game save; our share state lives only
