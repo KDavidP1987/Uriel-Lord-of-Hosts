@@ -6,6 +6,7 @@ using System.Text.Json;
 using Il2CppInterop.Runtime;
 using ProjectM;
 using ProjectM.CastleBuilding;
+using ProjectM.Network;
 using ProjectM.Shared;
 using ProjectM.Tiles;
 using Stunlock.Core;
@@ -85,6 +86,15 @@ internal sealed class ObjectSpawnService
     }
 
     readonly List<SpawnRecord> _records = new();
+    // Live spawn marker (in-session): the set of entities Uriel has spawned this run. Populated on every
+    // spawn/respawn (RegisterRecord) and refreshed from the persistent registry on boot (ReapplySpawned),
+    // cleared per-entity on DestroySpawned. It is the LIGHT-purge identifier — a direct "this entity is
+    // ours" check with no tile-resolution and zero risk of matching a native object. NOT a persisted ECS
+    // component on purpose: V Rising's save drops mod-added components on restart (Bloodcraft & co. keep
+    // per-entity state in external JSON for the same reason), so the cross-restart source of truth stays
+    // the JSON registry (`_records`) — which the STRONG purge resolves. Entity equality includes Version,
+    // so a recycled entity slot never false-matches a stale handle left in this set.
+    readonly HashSet<Entity> _liveSpawns = new();
     // Admin blocklist: prefab GUIDs an admin has flagged ineligible/problematic. Blocked
     // prefabs are excluded from the catalog (so never discoverable/grantable/listed) AND
     // refused at spawn even by GUID. Persisted separately; changes invalidate the catalog.
@@ -205,6 +215,7 @@ internal sealed class ObjectSpawnService
                         int paidItem = 0, int paidAmount = 0,
                         int rot = 0, bool respawnOnDestroy = false, bool playerBreakable = false)
     {
+        _liveSpawns.Add(e); // mark as ours even if it ends up session-only (no TilePosition below)
         if (!e.TryGetComponent<TilePosition>(out var tp))
         {
             Core.Log.LogWarning($"[Uriel SPAWN] {e.GetPrefabGuid().GetPrefabName()} has no TilePosition; not persisted (session-only).");
@@ -370,6 +381,7 @@ internal sealed class ObjectSpawnService
                 changed = true;
                 continue;
             }
+            _liveSpawns.Add(e); // refresh the live marker from the persistent registry after a restart
             if (r.Indestructible)
             {
                 e.AddOrSet(new Immortal { IsImmortal = true });
@@ -475,6 +487,35 @@ internal sealed class ObjectSpawnService
         int gridZ = (int)math.floor(pos.z * 2) + TileGridOffset;
         return new int2((int)math.floor(gridX / BlockSize), (int)math.floor(gridZ / BlockSize));
     }
+
+    // How far in front of the player a `here`/at-player spawn lands, in metres. ~1.5m clears the
+    // character's own body (~1 tile footprint) so the object drops onto the floor in front of them
+    // instead of inside them. Tiles are 0.5m, so this is ~3 cells forward.
+    const float HerePlacementForward = 1.5f;
+
+    /// <summary>A point <see cref="HerePlacementForward"/> metres in front of the character's body
+    /// facing, kept at the character's feet height. Used for `here`/at-player spawns so the object
+    /// lands in FRONT of the player rather than on top of them. Falls back to the raw feet position
+    /// if the facing can't be read.</summary>
+    static float3 InFrontOf(Entity character, float3 feet)
+    {
+        if (character.TryGetComponent<Rotation>(out var rot))
+        {
+            float3 fwd = math.mul(rot.Value, new float3(0f, 0f, 1f));
+            fwd.y = 0f;
+            if (math.lengthsq(fwd) > 1e-4f)
+            {
+                fwd = math.normalize(fwd);
+                return new float3(feet.x + fwd.x * HerePlacementForward, feet.y, feet.z + fwd.z * HerePlacementForward);
+            }
+        }
+        return feet;
+    }
+
+    /// <summary>World position → tile-grid cell (KindredCommands ConvertPosToTileGrid). Shared by the
+    /// transform writer and the overlap guard so both speak the same coordinate space.</summary>
+    static int2 ConvertPosToTile(float3 pos) =>
+        new int2((int)math.floor(pos.x * 2) + TileGridOffset, (int)math.floor(pos.z * 2) + TileGridOffset);
 
     int GetTerritoryIndex(float3 pos)
     {
@@ -641,22 +682,45 @@ internal sealed class ObjectSpawnService
     ///  - AB_* ability-effect objects (spike traps, boss hazard spinners, continuous-damage areas);
     ///  - GM_* gamemaster/debug props; Liquid_* placement-rule objects; Summon*/USB_/PrefabVariant internals.
     /// Excluded by name family plus a Movement backstop (no real placeable object has Movement — verified).
-    /// Borderline-but-kept families: MicroPOI_* (tree/flower decor clusters) and EH_* (armor racks,
-    /// cages) — real world decor; an admin can '.uriel block' specific ones if undesired.
+    ///
+    /// INVISIBLE-WHEN-GRAFTED families (added 2026-06-09 after a live report that some spawns appear but
+    /// never render, suspected in a server crash):
+    ///  - MicroPOI* — ALL 85 are world-gen Point-of-Interest / territory SPAWNER controllers (the dump:
+    ///    73 carry MicroPOIConfig + MicroPOIUnitSpawnerElement, the other 12 are MicroPOISpawner_* /
+    ///    MicroPOIEmptySpawner_*). NONE carry a render component; their visuals live on LinkedEntityGroup
+    ///    children the POI system materialises during world-gen. Grafted bare into a castle you get an
+    ///    invisible logic entity whose UNIT SPAWNER can tick inside a player plot — exactly the kind of
+    ///    malformed state that can throw in a server system update (DEV_REMINDERS). The earlier
+    ///    "MicroPOI = tree/flower decor clusters, keep them" note was WRONG — verified none render.
+    ///  - *InvisibleObject* — TM_InvisibleObject_* AI/POI position markers (fishing spots, boss positions):
+    ///    invisible by design, but carry TM_/TilePosition so they pass IsPlaceableObject.
+    ///
+    /// CONTEXT-ONLY building pieces — networked (so NetworkId can't catch them) but only render in their
+    /// proper structural context, NOT at ground level (added 2026-06-09 after a live report):
+    ///  - ROOF TILES — TM_CastleRoof_Type0-14 + TM_RusticHouse_Roofing_Type0-14 (30 total). They carry
+    ///    ProjectM.CastleBuilding.CastleRoofOrnaments + ProjectM.Roofs.RoofTileData; the roof system places
+    ///    them at a HEIGHT above walls. Dropped at the floor they have nowhere to sit and render invisibly.
+    ///    Caught by the CastleRoofOrnaments component (exactly those 30 — verified identical to the
+    ///    RoofTileData set; NOT the broader ProjectM.Roofs namespace, which also tags castle FLOORS).
     /// </summary>
     static readonly string[] NonObjectPrefixes =
-        { "CHAR_", "AB_", "GM_", "Liquid_", "Summon", "USB_", "PrefabVariant" };
+        { "CHAR_", "AB_", "GM_", "Liquid_", "Summon", "USB_", "PrefabVariant", "MicroPOI" };
 
     static bool IsNonObject(string name, Entity prefab)
     {
         foreach (var p in NonObjectPrefixes)
             if (name.StartsWith(p, StringComparison.OrdinalIgnoreCase)) return true;
+        // Invisible AI/POI position markers (TM_InvisibleObject_*): substring, not prefix (the TM_ leads).
+        // NB: deliberately NOT "Invisible" alone — invisible castle walls/floors (TM_Castle_*_Invisible)
+        // are legitimate build pieces filtered elsewhere; only the *Object* markers are caught here.
+        if (name.IndexOf("InvisibleObject", StringComparison.OrdinalIgnoreCase) >= 0) return true;
         // Component backstop — catches units the name filter could miss. EVERY character/NPC carries
         // Movement (verified across the CHAR_* dump: all 532 have it, alongside TilePosition which
         // otherwise lets them pass IsPlaceableObject), and V Bloods additionally carry VBloodConsumeSource.
-        // A real placeable world object has neither. This is what makes "no characters/V Bloods" robust
-        // even for a unit whose name doesn't start with CHAR_.
-        return prefab.Has<Movement>() || prefab.Has<VBloodConsumeSource>();
+        // MicroPOI controllers carry MicroPOIInstance; roof tiles carry CastleRoofOrnaments (render only at
+        // height, invisible at ground). A real placeable world object has none of these — robust to renames.
+        return prefab.Has<Movement>() || prefab.Has<VBloodConsumeSource>()
+            || prefab.Has<MicroPOIInstance>() || prefab.Has<CastleRoofOrnaments>();
     }
 
     /// <summary>Structural "is this a real placeable WORLD object?" test for an arbitrary GUID — the
@@ -1177,8 +1241,19 @@ internal sealed class ObjectSpawnService
 
     /// <summary>A prefab a player could place: tile model (TilePosition), castle buildable
     /// (EditableTileModel), or castle-owned object (CastleHeartConnection).</summary>
+    // A real placeable object must (a) carry a tile/placement component AND (b) be NETWORKED. The
+    // network requirement is what makes a runtime-spawned object actually RENDER on the client: a
+    // networked entity is replicated via NetworkSnapshot, so the client is told it exists and draws it.
+    // A non-networked tile model is baked world-static geometry — it exists only on the server, the
+    // client is never notified, and the spawn is INVISIBLE (you only know it's there when you despawn
+    // it). Live report (2026-06-09): TM_*_Original world-gen source clusters and MicroPOI controllers
+    // spawned invisibly; a prefab-dump audit confirmed those (and only ~36 of 3778 TM_ prefabs) lack
+    // NetworkId, while every visible category (furniture, lights, containers, resource nodes, stairs)
+    // has it. Requiring NetworkId is the principled fix for the whole invisible-spawn class — far more
+    // robust than chasing name families one at a time.
     static bool IsPlaceableObject(Entity prefab) =>
-        prefab.Has<TilePosition>() || prefab.Has<EditableTileModel>() || prefab.Has<CastleHeartConnection>();
+        (prefab.Has<TilePosition>() || prefab.Has<EditableTileModel>() || prefab.Has<CastleHeartConnection>())
+        && prefab.Has<NetworkId>();
 
     /// <summary>The longest non-numeric token of a prefab name — a search hint for the real object.</summary>
     static string DiscoveryHint(string name)
@@ -1331,6 +1406,89 @@ internal sealed class ObjectSpawnService
     static string Clamp(string s) =>
         s.Length <= ReplyByteBudget ? s : s.Substring(0, ReplyByteBudget - 3) + "...";
 
+    // ============================================================ overlap guard
+
+    // Vertical tolerance (~one castle storey) for the overlap test. Two tile objects within this much
+    // height of each other count as the SAME building level; further apart they're treated as different
+    // floors and don't collide. This keeps the guard strict within the level you're decorating while not
+    // false-positiving on a multi-storey castle (an upper-floor cell shares the (x,y) tile of the wall
+    // below it). A castle wall/storey is ~2.5m tall.
+    const float OverlapHeightBand = 2.5f;
+
+    // Horizontal proximity floor (~one tile) for the overlap test. The integer tile-cell test only trips
+    // when two anchor cells are IDENTICAL, so a free-aim MOVE that lands a fraction of a tile away
+    // (straddling a cell boundary) visually overlaps but slips through. This center-to-center distance
+    // catches that near-stacking. NOT applied to walls — a wall sits on a tile boundary and decor placed
+    // flush against it is legitimate; only the exact-cell test should bite a drop INTO a wall's own cell.
+    const float OverlapMinDistance = 0.5f;
+
+    /// <summary>
+    /// Strict placement guard (config <c>ObjectSpawn.PreventOverlap</c>): would a spawn at
+    /// <paramref name="pos"/> land on a tile cell already occupied by a NON-floor tile model — a wall,
+    /// crafting station, native prop, the castle heart, or another spawned object? Floors are the explicit
+    /// exception (decor sits on floors). The candidate occupies its single anchor cell (placed objects use
+    /// a 1×1 footprint); each existing tile model is tested as its <c>TilePosition.Tile</c> expanded by any
+    /// runtime <c>TileBounds</c> extent, within <see cref="OverlapHeightBand"/> of the candidate's height.
+    /// <paramref name="ignore"/> excludes the object being moved (so a short move doesn't collide with
+    /// itself). Returns true (with the blocker's name) when placement should be REFUSED.
+    /// </summary>
+    bool WouldOverlap(float3 pos, Entity ignore, out string blockerName)
+    {
+        blockerName = null;
+        if (!Settings.ObjectSpawn_PreventOverlap.Value) return false;
+
+        int2 cell = ConvertPosToTile(pos);
+        var builder = new EntityQueryBuilder(Allocator.Temp)
+            .AddAll(new(Il2CppType.Of<PrefabGUID>(), ComponentType.AccessMode.ReadOnly))
+            .AddAll(new(Il2CppType.Of<TilePosition>(), ComponentType.AccessMode.ReadOnly))
+            .AddAll(new(Il2CppType.Of<Translation>(), ComponentType.AccessMode.ReadOnly))
+            .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
+        var query = Core.EntityManager.CreateEntityQuery(ref builder);
+        var entities = query.ToEntityArray(Allocator.Temp);
+        bool overlap = false;
+        try
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var e = entities[i];
+                if (e == ignore) continue;
+                if (e.Has<Movement>()) continue;                         // units/players move — a character
+                                                                         // (incl. the caster's own body, which
+                                                                         // carries TilePosition) never blocks a
+                                                                         // build placement
+                if (e.Has<CastleFloor>()) continue;                      // floors are allowed under decor
+                if (!e.TryGetComponent<TilePosition>(out var tp)) continue;
+                if (!e.TryGetComponent<Translation>(out var tr)) continue;
+                if (math.abs(tr.Value.y - pos.y) > OverlapHeightBand) continue; // different building level
+
+                int2 oMin = tp.Tile, oMax = tp.Tile;
+                if (e.TryGetComponent<TileBounds>(out var tb))
+                {
+                    int2 ext = new int2(math.abs(tb.Value.Max.x - tb.Value.Min.x),
+                                        math.abs(tb.Value.Max.y - tb.Value.Min.y));
+                    oMax = new int2(tp.Tile.x + ext.x, tp.Tile.y + ext.y);
+                }
+                // The candidate's single anchor cell falls inside the existing object's tile box?
+                bool hit = cell.x >= oMin.x && cell.x <= oMax.x && cell.y >= oMin.y && cell.y <= oMax.y;
+                // Proximity backstop for sub-cell straddles (the move gap): centers too close. Walls are
+                // exempt so decor can sit flush against them (the cell test still guards drops into a wall).
+                if (!hit && !e.Has<CastleWall>())
+                {
+                    float dx = tr.Value.x - pos.x, dz = tr.Value.z - pos.z;
+                    if (dx * dx + dz * dz < OverlapMinDistance * OverlapMinDistance) hit = true;
+                }
+                if (hit)
+                {
+                    blockerName = e.GetPrefabGuid().GetPrefabName();
+                    overlap = true;
+                    break;
+                }
+            }
+        }
+        finally { entities.Dispose(); }
+        return overlap;
+    }
+
     // ============================================================ spawn
 
     /// <summary>
@@ -1383,8 +1541,10 @@ internal sealed class ObjectSpawnService
         float3 pos;
         if (atFeet)
         {
-            if (!PublicStorageService.TryGetCharacterPosition(character, out pos))
+            if (!PublicStorageService.TryGetCharacterPosition(character, out var feet))
             { message = "Could not read your position."; return false; }
+            // Place it in front of the player, not inside their body (the `here`/UI path has no aim ray).
+            pos = InFrontOf(character, feet);
         }
         else if (character.TryGetComponent<EntityAimData>(out var aim) && !aim.AimPosition.Equals(default(float3)))
             pos = aim.AimPosition;
@@ -1396,6 +1556,17 @@ internal sealed class ObjectSpawnService
         if (!CheckPlacement(character, isAdmin, pos, "placed", out Entity heart, out int territory, out string gateErr))
         {
             message = gateErr;
+            return false;
+        }
+
+        // OVERLAP GATE (everyone, incl. admins): don't drop the object inside a wall/station/prop or onto
+        // another spawned object — only floors may sit under it. Guards against the pile-ups that can
+        // destabilise the server. Config ObjectSpawn.PreventOverlap (default on) governs it.
+        if (WouldOverlap(pos, Entity.Null, out string blocker))
+        {
+            message = Clamp($"Can't place {name} there — it would overlap {blocker}. Objects can't be placed " +
+                            "inside walls, stations, or other spawned objects (only floors may sit under them). " +
+                            "Aim at a clear spot. (Admins can disable ObjectSpawn.PreventOverlap to allow stacking.)");
             return false;
         }
 
@@ -1553,7 +1724,7 @@ internal sealed class ObjectSpawnService
         rot &= 3;
         var tileRot = (TileRotation)rot;
         quaternion q = quaternion.RotateY(math.radians(90f * rot));
-        int2 tile = new int2((int)math.floor(pos.x * 2) + TileGridOffset, (int)math.floor(pos.z * 2) + TileGridOffset);
+        int2 tile = ConvertPosToTile(pos);
 
         e.With((ref Translation t) => t.Value = pos);
         if (e.Has<Rotation>()) e.With((ref Rotation r) => r.Value = q);
@@ -1637,6 +1808,9 @@ internal sealed class ObjectSpawnService
         { message = gateErr; return false; }
 
         string name = target.GetPrefabGuid().GetPrefabName();
+        // Overlap gate (excluding the object itself, so a short move doesn't collide with its own cell).
+        if (WouldOverlap(dest, target, out string blocker))
+        { message = Clamp($"Can't move {name} there — it would overlap {blocker}. Aim at a clear spot."); return false; }
         if (!RespawnAt(target, rec, dest, CurrentRot(target), heart, territory, out _, out string err)) { message = err; return false; }
         Core.Log.LogInfo($"[Uriel SPAWN] moved {name} to ({dest.x:F1},{dest.y:F1},{dest.z:F1}){(toFeet ? " [at player]" : "")}.");
         message = toFeet ? $"Moved {name} to your location." : $"Moved {name} to your aim point.";
@@ -1733,30 +1907,92 @@ internal sealed class ObjectSpawnService
         return Clamp(sb.ToString());
     }
 
-    /// <summary>Remove EVERY Uriel-spawned object on the plot the caller is standing in.</summary>
-    public bool PurgePlot(Entity character, out string message)
+    /// <summary>
+    /// Shared plot-purge engine for the LIGHT (`.uriel purgeplot`) and STRONG (`.uriel forcepurgeplot`)
+    /// commands. Removes Uriel's objects on a plot using ONLY signals that are unambiguously ours — it
+    /// never touches a native object — applied cheapest/safest first:
+    ///   (1) LIVE MARKER (`_liveSpawns`): entities Uriel spawned this run, plot-scoped by territory
+    ///       blocks. Direct hit, no tile-resolution; catches an object whose registry record drifted or
+    ///       was lost this session.
+    ///   (2) REGISTRY (`_records`): records on this plot resolved to their live entity — the persistent
+    ///       source of truth, so this is what works after a restart (when the live marker is empty until
+    ///       a re-apply repopulates it). Records are dropped whether or not the entity currently resolves.
+    ///   (3) CHAIN (STRONG only): legacy `SpawnChainChild` spawns with no record, plot-scoped — the one
+    ///       structural marker no native object carries.
+    /// The deliberately-removed heuristics (Immortal / CastleHeartConnection==heart) are NOT here: native
+    /// garden plants and claimed trees share them, which is what caused the ~2000-object over-deletion.
+    /// </summary>
+    (int marker, int tracked, int chains) PurgePlotCore(Entity heart, int territory, bool strong)
     {
-        if (!PublicStorageService.TryGetCharacterPosition(character, out var pos))
-        { message = "Could not read your position."; return false; }
-        if (!TryResolvePlot(pos, out _, out int territory))
-        { message = "You're not standing in a castle plot."; return false; }
+        var blocks = GetPlotBlocks(heart);
+        int marker = 0, tracked = 0, chains = 0;
 
+        // (1) Live marker set — direct, in-session. Needs territory blocks to scope to THIS plot.
+        if (blocks.Count > 0)
+            foreach (var e in new List<Entity>(_liveSpawns))
+            {
+                if (!e.Exists()) { _liveSpawns.Remove(e); continue; }
+                if (!e.TryGetComponent<Translation>(out var tr)) continue;
+                if (!blocks.Contains(BlockKey(ConvertPosToBlockCoord(tr.Value)))) continue;
+                DestroySpawned(e); // removes it from _liveSpawns
+                marker++;
+            }
+
+        // (2) Registry records on this plot — resolve + destroy (persistent; survives restart). Anything
+        // already destroyed in pass 1 won't re-resolve (fresh index), so no double count.
         var index = BuildLiveIndex();
-        int removed = 0;
         foreach (var r in new List<SpawnRecord>(_records))
         {
             if (r.TerritoryIndex != territory) continue;
             Entity e = index.Resolve(r);
-            if (e != Entity.Null)
-                DestroySpawned(e);
+            if (e != Entity.Null && e.Exists()) { DestroySpawned(e); tracked++; }
             _records.Remove(r);
-            removed++;
         }
+
+        // (3) STRONG only — legacy untracked chain spawns within this plot's blocks.
+        if (strong && blocks.Count > 0)
+        {
+            var builder = new EntityQueryBuilder(Allocator.Temp)
+                .AddAll(new(Il2CppType.Of<SpawnChainChild>(), ComponentType.AccessMode.ReadOnly))
+                .AddAll(new(Il2CppType.Of<Translation>(), ComponentType.AccessMode.ReadOnly))
+                .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
+            var query = Core.EntityManager.CreateEntityQuery(ref builder);
+            var entities = query.ToEntityArray(Allocator.Temp);
+            try
+            {
+                for (int i = 0; i < entities.Length; i++)
+                {
+                    var e = entities[i];
+                    if (e.Has<CastleHeart>()) continue;
+                    if (!e.TryGetComponent<Translation>(out var tr)) continue;
+                    if (!blocks.Contains(BlockKey(ConvertPosToBlockCoord(tr.Value)))) continue;
+                    DestroySpawned(e); // also tears down the looping chain controller
+                    chains++;
+                }
+            }
+            finally { entities.Dispose(); }
+        }
+
         SaveSync();
-        Core.Log.LogInfo($"[Uriel SPAWN] purged {removed} object(s) from territory {territory}.");
+        return (marker, tracked, chains);
+    }
+
+    /// <summary>LIGHT purge — remove Uriel's objects on the plot you're standing in via the live marker +
+    /// the persistent registry. Precise and safe; never touches native objects. If a stray survives (e.g.
+    /// a legacy chain spawn), escalate to '.uriel forcepurgeplot'.</summary>
+    public bool PurgePlot(Entity character, out string message)
+    {
+        if (!PublicStorageService.TryGetCharacterPosition(character, out var pos))
+        { message = "Could not read your position."; return false; }
+        if (!TryResolvePlot(pos, out Entity heart, out int territory))
+        { message = "You're not standing in a castle plot."; return false; }
+
+        var (marker, tracked, _) = PurgePlotCore(heart, territory, strong: false);
+        int removed = marker + tracked;
+        Core.Log.LogInfo($"[Uriel SPAWN] purged {removed} object(s) ({marker} marker + {tracked} record) from territory {territory}.");
         message = removed == 0
-            ? "No Uriel-spawned objects on this plot to purge."
-            : $"Purged {removed} Uriel-spawned object(s) from this plot.";
+            ? "No Uriel-spawned objects on this plot to purge. (If a stray persists, try '.uriel forcepurgeplot'.)"
+            : $"Purged {removed} Uriel-spawned object(s) from this plot. Native objects were left untouched.";
         return true;
     }
 
@@ -1824,6 +2060,7 @@ internal sealed class ObjectSpawnService
     /// </summary>
     void DestroySpawned(Entity e)
     {
+        _liveSpawns.Remove(e); // keep the live marker in sync no matter which path removes the object
         if (!e.Exists()) return;
         try
         {
@@ -1945,13 +2182,14 @@ internal sealed class ObjectSpawnService
     }
 
     /// <summary>
-    /// Admin: force-purge every Uriel-LIKE object on the plot you're standing in, even ones no record
-    /// tracks (chain-era spawns included). Scoped to this plot by territory blocks (cheap O(1) per
-    /// object). An object is "ours" if it carries our indestructible signature (Immortal), is a
-    /// spawn-chain child (`SpawnChainChild` — the chain-era chest case, which has neither Immortal
-    /// nor a heart link), or is connected to THIS castle's heart. Native build-menu pieces
-    /// (BlueprintData) and the heart are always left alone. Each kill also tears down any looping
-    /// chain controller. Also clears this plot's registry records.
+    /// STRONG purge (admin) — everything the LIGHT '.uriel purgeplot' does (live marker + registry) PLUS
+    /// a legacy <c>SpawnChainChild</c> chain-spawn sweep on the plot. Uses ONLY signals unambiguously
+    /// Uriel's; it deliberately does NOT sweep by Immortal or CastleHeartConnection==heart — adoption
+    /// (ExecuteSpawn) copies those VANILLA components onto our objects, but native garden plants,
+    /// castle-claimed trees/flowers, and world props inside the plot carry them too, so an earlier
+    /// heart-connection sweep deleted ~2000 native objects on a tester's plot (reported 2026-06-09).
+    /// A truly-untracked, non-chain Uriel object (record lost AND not in this session's live marker) is
+    /// not bulk-removable here by design; aim at it and use '.uriel forcedespawn' (per-object, safe).
     /// </summary>
     public bool ForcePurgePlot(Entity character, out string message)
     {
@@ -1960,44 +2198,77 @@ internal sealed class ObjectSpawnService
         if (!TryResolvePlot(pos, out Entity heart, out int territory))
         { message = "You're not standing in a castle plot."; return false; }
 
-        var blocks = GetPlotBlocks(heart);
-        if (blocks.Count == 0) { message = "Could not resolve this castle's territory blocks; aborted (nothing removed)."; return false; }
+        var (marker, tracked, chains) = PurgePlotCore(heart, territory, strong: true);
+        int removed = marker + tracked + chains;
+        Core.Log.LogInfo($"[Uriel SPAWN] force-purged {removed} object(s) ({marker} marker + {tracked} record + {chains} legacy chain) from territory {territory} by admin {character.GetSteamId()}.");
+        message = removed == 0
+            ? "No Uriel objects found on this plot (nothing native was touched)."
+            : $"Force-purged {removed} Uriel object(s) on this plot ({marker} marker + {tracked} record + {chains} legacy chain). " +
+              "Native objects, plants, trees, and build pieces were left untouched.";
+        return true;
+    }
 
-        var toDestroy = new List<Entity>();
-        var builder = new EntityQueryBuilder(Allocator.Temp)
-            .AddAll(new(Il2CppType.Of<PrefabGUID>(), ComponentType.AccessMode.ReadOnly))
-            .AddAll(new(Il2CppType.Of<TilePosition>(), ComponentType.AccessMode.ReadOnly))
-            .AddAll(new(Il2CppType.Of<Translation>(), ComponentType.AccessMode.ReadOnly))
+    /// <summary>
+    /// Admin SERVER-WIDE cleanup: scan EVERY Uriel-spawned object (registry-driven) and remove any that is
+    /// ORPHANED — sitting where no LIVING castle heart governs it (its castle was destroyed/decayed, or it's
+    /// otherwise in open world / on a plot with no heart). This is the manual, on-demand backup for the
+    /// automatic boot-time orphan purge (`ObjectSpawn.PurgeOrphansOnBoot`), for an admin to run anytime.
+    ///
+    /// Safe by construction: it iterates only Uriel's own records, so native world objects are never
+    /// touched. A streamed-out object (entity not resolvable right now) is LEFT ALONE with its record kept —
+    /// it may simply not be loaded — exactly like the boot purge; re-run after regions load if needed. As a
+    /// guard against a query glitch nuking everything, it ABORTS if it can't resolve any living castle plots.
+    /// </summary>
+    public bool PurgeOrphans(Entity character, out string message)
+    {
+        // One pass: collect the block coords of every plot that still has a LIVING heart. Disabled-included,
+        // so a streamed-out-but-alive castle still counts (its objects are NOT treated as orphans). A
+        // genuinely destroyed heart is absent from the query, so its plot's blocks won't be in the set.
+        var livingBlocks = new HashSet<long>();
+        int heartCount;
+        var heartBuilder = new EntityQueryBuilder(Allocator.Temp)
+            .AddAll(new(Il2CppType.Of<CastleHeart>(), ComponentType.AccessMode.ReadOnly))
             .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
-        var query = Core.EntityManager.CreateEntityQuery(ref builder);
-        var entities = query.ToEntityArray(Allocator.Temp);
+        var heartQuery = Core.EntityManager.CreateEntityQuery(ref heartBuilder);
+        var hearts = heartQuery.ToEntityArray(Allocator.Temp);
         try
         {
-            for (int i = 0; i < entities.Length; i++)
+            heartCount = hearts.Length;
+            for (int i = 0; i < hearts.Length; i++)
+                foreach (var b in GetPlotBlocks(hearts[i])) livingBlocks.Add(b);
+        }
+        finally { hearts.Dispose(); }
+
+        // Safety: if we somehow resolved no living plots, refuse to run — otherwise EVERY object would look
+        // orphaned. A server hosting Uriel objects always has at least one heart; an empty result is a glitch.
+        if (livingBlocks.Count == 0)
+        {
+            message = $"Aborted — couldn't resolve any living castle plots ({heartCount} heart(s) seen). " +
+                      "Nothing was removed (safety guard). Try again once castles are loaded.";
+            return false;
+        }
+
+        var index = BuildLiveIndex();
+        int removed = 0, loaded = 0, unresolved = 0;
+        foreach (var r in new List<SpawnRecord>(_records))
+        {
+            Entity e = index.Resolve(r);
+            if (e == Entity.Null) { unresolved++; continue; } // not loaded right now — keep, may stream in
+            loaded++;
+            float3 pos = e.TryGetComponent<Translation>(out var tr) ? tr.Value : new float3(r.PosX, r.PosY, r.PosZ);
+            if (!livingBlocks.Contains(BlockKey(ConvertPosToBlockCoord(pos)))) // no living heart governs it
             {
-                var e = entities[i];
-                if (e.Has<CastleHeart>()) continue;   // never the heart
-                if (e.Has<BlueprintData>()) continue; // native build-menu piece — leave it
-                if (!e.TryGetComponent<Translation>(out var tr)) continue;
-                if (!blocks.Contains(BlockKey(ConvertPosToBlockCoord(tr.Value)))) continue; // this plot only
-                bool ours = (e.TryGetComponent<Immortal>(out var im) && im.IsImmortal)
-                            || e.Has<SpawnChainChild>()
-                            || (e.TryGetComponent<CastleHeartConnection>(out var c) && c.CastleHeartEntity.GetEntityOnServer() == heart);
-                if (ours) toDestroy.Add(e);
+                DestroySpawned(e);
+                _records.Remove(r);
+                removed++;
             }
         }
-        finally { entities.Dispose(); }
-
-        int removed = 0;
-        foreach (var e in toDestroy) { DestroySpawned(e); removed++; }
-
-        int recordsCleared = _records.RemoveAll(r => r.TerritoryIndex == territory);
-        if (recordsCleared > 0) SaveSync();
-        Core.Log.LogInfo($"[Uriel SPAWN] force-purged {removed} object(s) (+{recordsCleared} record(s)) from territory {territory} by admin {character.GetSteamId()}.");
-        message = removed == 0 && recordsCleared == 0
-            ? "No Uriel-like objects (or records) found on this plot."
-            : $"Force-purged {removed} object(s) on this plot (cleared {recordsCleared} record(s)). " +
-              "Native build-menu pieces were left untouched.";
+        if (removed > 0) SaveSync();
+        Core.Log.LogInfo($"[Uriel SPAWN] server-wide orphan scan by admin {character.GetSteamId()}: removed {removed} orphan(s) of {loaded} loaded object(s); {unresolved} not loaded (kept). {livingBlocks.Count} living plot block(s), {heartCount} heart(s).");
+        string tail = unresolved > 0 ? $" {unresolved} object(s) weren't loaded and were skipped — re-run after they load if needed." : "";
+        message = removed == 0
+            ? $"Orphan scan complete — no orphaned Uriel objects found ({loaded} checked).{tail}"
+            : $"Orphan scan complete — removed {removed} orphaned Uriel object(s) (castle gone / no living heart governing them); {loaded} checked. Native objects were never touched.{tail}";
         return true;
     }
 }

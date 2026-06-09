@@ -9,12 +9,20 @@ independent, admin-toggleable quality-of-life enhancements and structural fixes.
 
 ## ⚠ Heads-up before you install
 
-**Pre-1.0 — in active development.** Uriel is pre-release and evolving quickly.
-The features below are implemented and have been tested, but
-this is a **server-side mod still under development**: by running it you are
-helping test it, and **you take that risk on yourself.** Please **back up your
-server save** before adding any new mod. Commands, config keys, and behavior may
-still change before 1.0.
+**Pre-1.0 — in active development. Test it first; don't roll it out broadly on a
+busy live server until you've vetted it yourself.** Uriel is pre-release and
+evolving quickly. The features below are implemented and tested **in local and
+dedicated development/test-server environments — not yet on a live production
+server**. This is a **server-side mod still under development**: by running it you
+are helping test it, and **you take that risk on yourself.** Please **back up your
+server save** before adding any new mod, and ideally **trial Uriel on a test server
+(or a quiet plot) first**. Commands, config keys, and behavior may still change
+before 1.0.
+
+**Every feature is independently toggleable.** If any one component feels
+unstable, you can **turn just that part off** in the config (each feature has its
+own `Enabled` switch) and keep using the rest — you never have to disable Uriel
+wholesale. See the per-section notes below and the **Configuration** table.
 
 **Found a bug or have an idea?** The fastest way to get a fix into the next
 release is the **[The Shadow Realm Discord](https://discord.gg/usC9QgBrXK)** —
@@ -64,6 +72,28 @@ build cost, block specific objects, and grant objects directly.
 > the game won't let arbitrary world objects be selected in build mode). The
 > optional **BloodCraftHub** companion can present a point-and-click palette UI.
 
+> **🧪 Pre-1.0 guidance & quick tips (Object Spawning):**
+> - **Hazardous/problematic prefabs are blocked from spawning.** The game's object
+>   list contains many entries that aren't real placeable décor (world-gen
+>   controllers, NPC-spawner "points of interest", invisible markers, baked
+>   "source" copies). Known-bad ones are filtered out of the catalog so players
+>   can't pick them. **This filter is still being refined** — there may be
+>   problematic objects not yet found.
+> - **If something spawns but you can't see it, it's INVISIBLE, not absent.** The
+>   object is almost certainly there on the server but not rendering correctly (it's
+>   one of the not-yet-caught bad ones). **`.uriel despawn` it** to be safe — don't
+>   leave it sitting there — and please report it so it can be blocked.
+> - **Don't overlap objects on purpose.** Stacking objects in the same spot can
+>   cause problems; Uriel blocks overlapping placements by default
+>   (`ObjectSpawn.PreventOverlap`). Offset things slightly instead.
+> - **Admins can block any object** they don't want available — even one that isn't
+>   hard-coded blocked — with `.uriel block <guid>` (or by configuring their
+>   server). Blocked prefabs vanish from the catalog and can't be spawned.
+> - **Prefer admin-only while you vet it:** the default `ObjectSpawn.AdminOnly=true`
+>   keeps spawning to admins; open it to players once you're comfortable. You can
+>   also disable this whole feature (`ObjectSpawn.Enabled=false`) and keep the rest
+>   of Uriel.
+
 ### 🗄 Public Storage *(per-container opt-in)*
 
 Mark a **specific** chest as publicly accessible so anyone on the server can use
@@ -89,6 +119,14 @@ command covers everyone else.
 > before their client recognizes it as accessible. After that initial relog, it
 > behaves like any other container you can open.
 
+> **🧪 Pre-1.0 guidance (Public Storage):** sharing is always **per-container,
+> owner opt-in** — nothing is shared unless someone shares it, so the blast radius
+> is small. Trial it on a few containers first. Chest sharing and prison-cell
+> sharing have **separate switches** (`PublicStorage.Enabled` /
+> `PublicStorage.PrisonEnabled`), so you can enable one and not the other. Found
+> an issue? Report it on Discord and, if needed, flip the switch off — your
+> containers simply go back to private.
+
 ### 🪜 Stair Editing
 
 - **Live restyle** — aim at a placed staircase and swap it to another style;
@@ -100,6 +138,12 @@ command covers everyone else.
 - **Clean removal** — `.uriel removestairs` deletes a staircase you own **without**
   tearing apart the floors and walls it's attached to (something a normal
   dismantle can't cleanly do).
+
+> **🧪 Pre-1.0 guidance (Stair Editing):** restyling rebuilds the staircase on the
+> spot (destroy + respawn in the new style); position, rotation, and ownership are
+> preserved. As with any pre-1.0 feature, try it on a spare staircase first. If a
+> stray "ghost" stair is ever left behind, an admin can clean it with
+> `.uriel stairpurge`. You can disable the whole feature with `StairSwap.Enabled=false`.
 
 ## Installation
 
@@ -174,9 +218,10 @@ In **Discovery** mode you unlock objects by **destroying them in the world**; th
 | `.uriel grant\|revoke <player> <name\|guid>` | Unlock / remove an object for a player |
 | `.uriel grantall <player> [all\|destructible\|indestructible]` | Bulk-grant the catalog (or a subset) |
 | `.uriel block\|unblock <guid>` · `.uriel blocklist` | Forbid / allow a prefab |
-| `.uriel spawnlist` · `.uriel purgeplot` | List / clear spawned objects on the plot |
+| `.uriel spawnlist` · `.uriel purgeplot` | List / **light-clear** spawned objects on the plot (live spawns + records; native objects never touched) |
 | `.uriel forcedespawn [confirm]` | Force-remove the aimed object, ignoring records/ownership (recovers untracked objects); names it, then `confirm` within 30s |
-| `.uriel forcepurgeplot` | Force-remove every Uriel-like object on the plot, including untracked ones (native build pieces are left) |
+| `.uriel forcepurgeplot` | **Strong purge** — everything `purgeplot` does plus a legacy chain-spawn sweep. Native objects, plants, trees, and build pieces are left untouched |
+| `.uriel purgeorphans` | **Server-wide cleanup** — scan the whole map and remove orphaned Uriel objects (castle gone, or no living heart governing them). Only Uriel's objects are touched; a backup for the automatic boot-time cleanup |
 | `.uriel bossmap add\|remove\|list <vblood> <obj>` | Curate which objects a V-blood defeat unlocks |
 | `.uriel api version\|catalog\|unlocked` | Machine API for BloodCraftHub |
 </details>
@@ -248,6 +293,7 @@ Config changes take effect on server restart.
 | ObjectSpawn | IncludeCastleBuildables | `false` | Include the normal build-menu pieces in the catalog (off = world objects only) |
 | ObjectSpawn | PrefabCostItem / PrefabCostStack | `0` / `0` | Item + amount a player pays to build one object (0 = free) |
 | ObjectSpawn | Indestructible | `true` | Spawned objects are immortal + decay-proof by default (per-spawn `breakable`/`smashable` flags override; turn off globally for PvP) |
+| ObjectSpawn | PreventOverlap | `true` | Refuse to spawn/move an object onto a wall, station, or another spawned object (only floors may sit under décor) — prevents destabilizing pile-ups. Set `false` to allow free stacking at your own risk |
 | ObjectSpawn | RespawnEnabled | `true` | Master switch for the `respawn` flag (auto-return destroyed objects until the castle is gone) |
 | ObjectSpawn | RespawnPollSeconds | `30` | How often (seconds, min 5) the respawn check runs |
 | ObjectSpawn | *(more)* | — | CollectionEnabled, BossUnlocksEnabled, DiscoveryNotify, RefundOnRemove, PurgeOrphansOnBoot — see the generated `.cfg` |
@@ -285,9 +331,12 @@ Have a feature you'd like to see in the host? Bring it to the
 
 ## Feedback & community
 
-Built and tested on the V Rising server **The Shadow Realm** (Brutal PvE),
-maintained by Chaos. As a pre-1.0 mod, **bug reports and feedback are hugely
-valued** — and the people who help test now shape what 1.0 becomes.
+Developed and tested **locally and on dedicated development/test servers** — it
+has **not yet been run on a live production server**, which is exactly why it's
+pre-1.0 (see the heads-up at the top). It comes out of the V Rising community
+**The Shadow Realm** (Brutal PvE), maintained by Chaos, whose Discord is the home
+for Uriel testing and feedback. As a pre-1.0 mod, **bug reports and feedback are
+hugely valued** — and the people who help test now shape what 1.0 becomes.
 
 - **The Shadow Realm Discord (primary bug/feedback channel):** https://discord.gg/usC9QgBrXK
 - **Issues / source:** https://github.com/KDavidP1987/Uriel-Lord-of-Hosts

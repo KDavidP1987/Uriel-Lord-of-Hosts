@@ -20,6 +20,7 @@ internal static class Settings
     public static ConfigEntry<bool> ObjectSpawn_AdminOnly { get; private set; }
     public static ConfigEntry<float> ObjectSpawn_MaxTargetDistance { get; private set; }
     public static ConfigEntry<bool> ObjectSpawn_Indestructible { get; private set; }
+    public static ConfigEntry<bool> ObjectSpawn_PreventOverlap { get; private set; }
     public static ConfigEntry<bool> ObjectSpawn_PurgeOrphansOnBoot { get; private set; }
     public static ConfigEntry<bool> ObjectSpawn_RespawnEnabled { get; private set; }
     public static ConfigEntry<int> ObjectSpawn_RespawnPollSeconds { get; private set; }
@@ -103,6 +104,16 @@ internal static class Settings
             "the feature). Set TRUE to also expose the standard buildables through '.uriel spawn'/catalog. " +
             "(Identified by component, not the word 'Castle' — reliable. Admins can still GUID-spawn any " +
             "prefab regardless.)");
+
+        ObjectSpawn_PreventOverlap = config.Bind(
+            "ObjectSpawn", "PreventOverlap", true,
+            "Prevent a spawned object from being placed (or moved) onto a tile already occupied by a " +
+            "wall, crafting station, native prop, or another spawned object — i.e. it can't be dropped " +
+            "INSIDE other build pieces. FLOORS are the exception (you place decor on top of floors). This " +
+            "guards against the overlapping pile-ups that can destabilise/crash a server when many objects " +
+            "are spawned into the same spot. The check is limited to roughly one building level (objects on " +
+            "the floor above/below don't count), so multi-storey castles are unaffected. Set FALSE to allow " +
+            "free stacking/overlap (e.g. a candle directly on a table) at your own risk.");
 
         ObjectSpawn_PurgeOrphansOnBoot = config.Bind(
             "ObjectSpawn", "PurgeOrphansOnBoot", true,

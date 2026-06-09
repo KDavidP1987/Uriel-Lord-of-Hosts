@@ -238,9 +238,14 @@ by `guid`; `cat` = a coarse category for grouping + fallback icons, one of
 - Object MANAGEMENT (placed objects, plain-text replies — not `[URIEL:*]`): `.uriel despawn`/
   `move`/`rotate`/`spawninfo`/`spawnlist` (player, own plot), `.uriel purgeplot` (admin). These
   re-resolve the target from Uriel's spawned-object registry on demand, so they work across
-  relog/restart. Admin record-IGNORING recovery for untracked objects: `.uriel forcedespawn
-  [confirm]` (arm → names the prefab → confirm within 30s) and `.uriel forcepurgeplot`. All
-  reply in plain text; none emit `[URIEL:*]` wire lines (no BCH parsing required).
+  relog/restart. `.uriel purgeplot` is the LIGHT plot purge (in-session live-spawn marker +
+  persistent records); `.uriel forcepurgeplot` is the STRONG one (adds a legacy `SpawnChainChild`
+  chain sweep). Both touch only Uriel's objects — native objects/plants/build pieces are never
+  removed. `.uriel purgeorphans` (admin) is a server-wide sweep that removes tracked objects no
+  longer governed by a living castle heart (castle destroyed / open world). Admin record-IGNORING
+  per-object recovery: `.uriel forcedespawn [confirm]` (arm → names the prefab → confirm within
+  30s). All reply in plain text; none emit `[URIEL:*]` wire lines
+  (no BCH parsing required).
 
 ### 🎨 Object palette UI: rendering icons/previews (server can't ship images)
 
@@ -315,6 +320,14 @@ token.
 
 `nearest` is accepted as a synonym of `here` on spawn/move so BCH's existing "UI relays append `nearest`"
 convention (§3, used for storage/stairs) extends here unchanged.
+
+**Overlap refusal (new 2026-06-09):** `.uriel spawn` and `.uriel move` can now be REFUSED when the target
+tile is already occupied by a non-floor build piece (wall/station/native prop) or another spawned object —
+reply begins `Can't place <name> there — it would overlap <blocker>.` (or `Can't move … there — …`). This
+is a plain chat reply (not a `[URIEL:*]` line); a BCH placement panel should surface it as a "try a clear
+spot" message rather than treat the spawn as succeeded. Floors never trigger it (decor sits on floors).
+Server-gated by `ObjectSpawn.PreventOverlap` (default on); when an admin turns it off, the refusal never
+fires. No command/arg/wire shape changed — only this added failure path.
 
 ## 7. Change discipline (the living-contract rule)
 

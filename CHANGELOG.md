@@ -8,6 +8,93 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.18.0] - 2026-06-09
+
+Object Spawning stability pass — placement overlap guard, an invisible/hazardous-prefab
+filter, `here`-placement fix, and a safety rewrite of the plot-purge commands after a
+tester report that `forcepurgeplot` deleted native objects. All changes are to Object
+Spawning; other features untouched. See `docs/features/OBJECT_SPAWNING.md` for full
+mechanism write-ups.
+
+### Added — overlap guard (`ObjectSpawn.PreventOverlap`, default ON)
+
+- New `ObjectSpawnService.WouldOverlap` gate on `.uriel spawn` and `.uriel move`: refuses a
+  destination whose tile cell is occupied by a NON-floor tile model (wall, station, native
+  prop, castle heart, or another spawned object). **Floors are the explicit exception** (décor
+  sits on floors). Guards against the same-spot pile-ups that can destabilize a server.
+- **Characters/units never block** (`Has<Movement>()` skip) — the player's own body carries
+  `TilePosition` and was wrongly caught (refusing a `here` spawn with "would overlap Vampire
+  Male"); NPCs would too. `Movement` is the Bloodcraft-proven creature-vs-build-piece signal.
+- **Proximity backstop (`OverlapMinDistance = 0.5f`)** — the integer tile-cell test only trips
+  on identical anchor cells, so a free-aim **move** that lands a fraction of a tile away
+  (straddling a cell boundary) slipped through; a center-to-center distance check now catches
+  it. Walls are exempt so décor can sit flush against them.
+- Vertical band (`OverlapHeightBand = 2.5f`, ~one storey) keeps multi-storey castles unaffected.
+
+### Added — `here`/at-player spawns land in FRONT of the player
+
+- `InFrontOf` offsets a `here`/UI-button spawn ~1.5m (`HerePlacementForward`) along the
+  character's body facing (feet height preserved), so the object drops on the floor in front of
+  the player instead of inside their body. Falls back to raw feet if facing can't be read.
+
+### Fixed — invisible / hazardous prefabs filtered out of the catalog
+
+- `IsPlaceableObject` now also requires `ProjectM.Network.NetworkId`. A runtime-spawned tile
+  object only **renders on the client** if it is networked (replicated via `NetworkSnapshot`); a
+  non-networked tile model is baked world-static geometry that exists only server-side and spawns
+  **invisibly**. Audit: only 36 of 3778 `TM_` prefabs lack `NetworkId` — every visible category
+  (furniture, lights, containers, resource nodes, stairs) has it — so the filter is surgical.
+  This is the principled fix for the whole invisible-spawn class (e.g. `TM_*_Original` world-gen
+  source clusters), reported live with `TM_Strongblade_RockCluster_06_Original`.
+- Belt-and-suspenders name/component filters in `IsNonObject`: `MicroPOI*` (all 85 are POI /
+  territory spawner controllers carrying a **unit spawner** — a server hazard distinct from
+  invisibility), `*InvisibleObject*` AI/position markers, and a `MicroPOIInstance` backstop.
+- **Roof tiles blocked (context-only pieces).** `NetworkId` can't catch these — they ARE
+  networked, but the roof system only renders them at a height above walls, so spawned at
+  ground level they're invisible (reported with `TM_RusticHouse_Roofing_Type6`). `IsNonObject`
+  now also excludes `prefab.Has<CastleRoofOrnaments>()` — exactly the 30 `TM_CastleRoof_Type*`
+  + `TM_RusticHouse_Roofing_Type*` prefabs (NOT the broader `ProjectM.Roofs` namespace, which
+  also tags castle floors).
+- The filter flows through the catalog, the spawn-time gate, and stale-unlock pruning, so
+  already-unlocked bad prefabs are scrubbed from player lists too.
+
+### Fixed — `forcepurgeplot` no longer deletes native objects (data-loss bug)
+
+- A tester ran `.uriel forcepurgeplot` on a plot with 3 Uriel objects and it destroyed ~2000
+  ("every flower, tree, garden tile"). Root cause: the "ours" test matched
+  `CastleHeartConnection.CastleHeartEntity == heart`, but adoption (`ExecuteSpawn`) makes a Uriel
+  object castle-owned by **copying that vanilla component** — and native garden plants,
+  castle-claimed trees/flowers, and world props inside the territory carry it identically. Uriel
+  stamps no unique marker, so an adopted object is structurally indistinguishable from a natively
+  claimed one. The heart-connection (and bare-`Immortal`) heuristics are removed.
+
+### Added — two-tier plot purge + in-session live marker
+
+- New `_liveSpawns` (`HashSet<Entity>`) marks every Uriel spawn this run: added in
+  `RegisterRecord`, refreshed from the persistent registry in `ReapplySpawned` on boot, removed
+  in `DestroySpawned`. A direct "this entity is ours" check, no tile-resolution, zero chance of
+  matching a native object. Deliberately **not** a custom ECS component — V Rising's save drops
+  mod-added components on restart — so the JSON registry stays the cross-restart source of truth
+  and the marker is the fast in-session layer. (`Entity` equality includes Version, so a recycled
+  slot can't false-match a stale handle.)
+- Shared `PurgePlotCore` applies Uriel-only signals safest-first: (1) live marker, (2) registry
+  records, (3) `SpawnChainChild` legacy chain sweep. **`.uriel purgeplot` = LIGHT** (1–2);
+  **`.uriel forcepurgeplot` = STRONG** (1–3). Run light first, escalate to strong for legacy
+  leftovers. Replies report the per-tier breakdown. A truly-untracked non-chain object (record
+  lost AND not in this session's marker) is removed per-object via `.uriel forcedespawn`.
+
+### Added — `.uriel purgeorphans` (server-wide orphan cleanup, admin)
+
+- On-demand whole-map sweep that removes any tracked object no longer governed by a **living castle
+  heart** (its castle was destroyed/decayed, or it's otherwise in open world). The manual backup for
+  the automatic boot-time orphan purge (`ObjectSpawn.PurgeOrphansOnBoot`).
+- `ObjectSpawnService.PurgeOrphans` builds the set of all plot blocks owned by a living heart (every
+  `CastleHeart`, disabled-included so streamed-out-but-alive castles still count; a destroyed heart is
+  absent), then flags each resolvable registry object whose block isn't in that set. Registry-driven, so
+  it only ever touches Uriel's own objects — native world objects are never affected. Streamed-out
+  objects (unresolvable) are left alone with their records kept. **Safety abort** if zero living plot
+  blocks resolve (a query glitch), so it can never treat every object as an orphan.
+
 ## [0.17.0] - 2026-06-08
 
 ### Added — Object Spawning: breakable modes + auto-respawn

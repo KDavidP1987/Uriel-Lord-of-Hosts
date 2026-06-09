@@ -3,6 +3,30 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.18.0 (2026-06-09)
+
+- **New: objects can't be stacked inside each other or inside walls.** A placement guard
+  (`ObjectSpawn.PreventOverlap`, on by default) refuses to spawn or move an object onto a
+  wall, station, or another spawned object — only floors may sit under décor. This prevents
+  the overlapping pile-ups that can destabilize a server. **Tip: don't try to overlap objects
+  on purpose.** Admins can set it off to allow free stacking (at your own risk).
+- **New: `.uriel spawn … here` now drops the object in FRONT of you**, not on top of your
+  character. (`.uriel move` near yourself works the same way.)
+- **Fix: invisible / hazardous objects can no longer be spawned.** Some prefabs (world-gen
+  "point of interest" controllers, baked décor "source" copies, and **roof pieces** that only
+  render up on a building) end up **invisible** when spawned on the ground — and a few even
+  carry NPC spawners. These are now filtered out of the catalog so players can't pick them.
+  **If an object ever still spawns invisible, it's a not-yet-found bad one — `.uriel despawn`
+  it (it IS there, just not rendering) and please report it.**
+- **Fix (important): `.uriel forcepurgeplot` no longer deletes native objects.** It could
+  wrongly wipe a plot's plants, trees, and garden tiles. Plot-purge is now two tiers, and both
+  only ever touch Uriel's own objects: **`.uriel purgeplot`** = light (your spawns), **`.uriel
+  forcepurgeplot`** = strong (also clears legacy leftovers).
+- **New (admin): `.uriel purgeorphans`** — a server-wide cleanup that scans the whole map and
+  removes orphaned Uriel objects (ones whose castle was destroyed, or that are sitting where no
+  castle governs them). Only Uriel's own objects are ever touched. A handy backup to the automatic
+  cleanup that already runs at server start.
+
 ## 0.17.0 (2026-06-08)
 
 - **New: choose how a spawned object can be destroyed.** Add a flag when you spawn:

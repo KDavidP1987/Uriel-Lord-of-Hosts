@@ -12,10 +12,12 @@ fixes, each individually toggleable by server admins.
 ## ⚠ Status: pre-1.0, in active development
 
 Uriel is **pre-release** and not yet published to Thunderstore. The features
-below are implemented and have been tested on a live server, but this is a
-**server-side mod under active development** — if you run it, you're helping test
-it, and **you take that risk on yourself.** Back up your server save before
-installing any mod. Commands, config keys, and behavior may change before 1.0.
+below are implemented and tested **in local and dedicated development/test-server
+environments — not yet on a live production server**, which is why it's pre-1.0.
+This is a **server-side mod under active development** — if you run it, you're
+helping test it, and **you take that risk on yourself.** Back up your server save
+before installing any mod, and trial it on a test server first. Commands, config
+keys, and behavior may change before 1.0.
 
 **Bug reports & feedback:** the **[The Shadow Realm Discord](https://discord.gg/usC9QgBrXK)**
 is the primary channel (fastest path to a fix in the next release); written-up
@@ -74,7 +76,8 @@ In **Discovery** mode you unlock objects by **destroying them in the world** (co
 | `.uriel block\|unblock <guid>` · `.uriel blocklist` | Forbid / allow a prefab (excluded from catalog + collection %) |
 | `.uriel spawnlist` · `.uriel purgeplot` | List / clear all spawned objects on the plot you're in |
 | `.uriel forcedespawn [confirm]` | Force-remove the aimed object, ignoring records/ownership (recovers untracked objects); names it, then `confirm` within 30s |
-| `.uriel forcepurgeplot` | Force-remove every Uriel-like object on the plot, including untracked ones (native build pieces are left) |
+| `.uriel forcepurgeplot` | Strong per-plot purge: live spawns + records + a legacy chain-spawn sweep (native objects/plants/build pieces left untouched) |
+| `.uriel purgeorphans` | Server-wide cleanup: scan the whole map and remove orphaned Uriel objects (castle gone / no living heart governing them). Backup for the boot-time orphan purge |
 | `.uriel bossmap add\|remove\|list <vblood> <obj>` | Curate which objects a V-blood defeat unlocks |
 | `.uriel api version\|catalog\|unlocked` | `[URIEL:*]` machine API for BloodCraftHub |
 </details>
@@ -202,9 +205,10 @@ triggered NPC spawns, and basement levels. See
 
 ## Feedback & community
 
-Built and tested on the V Rising server **The Shadow Realm** (Brutal PvE),
-maintained by Chaos. Pre-1.0 testers shape what 1.0 becomes — feedback is hugely
-valued.
+Developed and tested **locally and on dedicated development/test servers** — not
+yet on a live production server. It comes out of the V Rising community **The
+Shadow Realm** (Brutal PvE), maintained by Chaos. Pre-1.0 testers shape what 1.0
+becomes — feedback is hugely valued.
 
 - **The Shadow Realm Discord (primary):** https://discord.gg/usC9QgBrXK
 - Support development: [PayPal](https://www.paypal.com/paypalme/KrisPenland) · [SkillEra.IO](https://SkillEra.IO)

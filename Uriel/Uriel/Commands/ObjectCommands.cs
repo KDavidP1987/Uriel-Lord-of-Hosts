@@ -96,7 +96,7 @@ internal static class ObjectCommands
         ctx.Reply(Core.ObjectSpawn.ListOnPlot(ctx.Event.SenderCharacterEntity));
     }
 
-    [Command("purgeplot", description: "Remove ALL Uriel-spawned objects on the castle plot you're standing in. Usage: .uriel purgeplot", adminOnly: true)]
+    [Command("purgeplot", description: "Light purge: remove Uriel's objects on the castle plot you're standing in (live spawns + tracked records). Native objects are never touched. If a stray survives, escalate to '.uriel forcepurgeplot'. Usage: .uriel purgeplot", adminOnly: true)]
     public static void PurgePlot(ChatCommandContext ctx)
     {
         if (!Ready(ctx)) return;
@@ -120,11 +120,19 @@ internal static class ObjectCommands
         ctx.Reply(message);
     }
 
-    [Command("forcepurgeplot", description: "Admin: force-remove EVERY Uriel-like indestructible object adopted into the plot you're standing in, even untracked ones (native build pieces and breakables are left). Usage: .uriel forcepurgeplot", adminOnly: true)]
+    [Command("forcepurgeplot", description: "Strong purge: everything '.uriel purgeplot' does (live spawns + records) PLUS a legacy chain-spawn sweep. Native objects, plants, trees, and build pieces are left untouched. (Untracked non-chain leftovers: aim + '.uriel forcedespawn'.) Usage: .uriel forcepurgeplot", adminOnly: true)]
     public static void ForcePurgePlot(ChatCommandContext ctx)
     {
         if (!Ready(ctx)) return;
         Core.ObjectSpawn.ForcePurgePlot(ctx.Event.SenderCharacterEntity, out string message);
+        ctx.Reply(message);
+    }
+
+    [Command("purgeorphans", description: "Admin: scan the WHOLE map and remove orphaned Uriel objects — ones whose castle heart is gone (castle destroyed/decayed) or that sit where no living heart governs them. Only Uriel's own objects are touched; native objects are never affected. Server-wide on-demand backup for the automatic boot-time cleanup. Usage: .uriel purgeorphans", adminOnly: true)]
+    public static void PurgeOrphans(ChatCommandContext ctx)
+    {
+        if (!Ready(ctx)) return;
+        Core.ObjectSpawn.PurgeOrphans(ctx.Event.SenderCharacterEntity, out string message);
         ctx.Reply(message);
     }
 
