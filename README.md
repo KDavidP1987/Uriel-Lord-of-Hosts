@@ -76,7 +76,7 @@ In **Discovery** mode you unlock objects by **destroying them in the world** (co
 | `.uriel block\|unblock <guid>` · `.uriel blocklist` | Forbid / allow a prefab (excluded from catalog + collection %) |
 | `.uriel spawnlist` · `.uriel purgeplot` | List / clear all spawned objects on the plot you're in |
 | `.uriel forcedespawn [confirm]` | Force-remove the aimed object, ignoring records/ownership (recovers untracked objects); names it, then `confirm` within 30s |
-| `.uriel forcepurgeplot` | Strong per-plot purge: live spawns + records + a legacy chain-spawn sweep (native objects/plants/build pieces left untouched) |
+| `.uriel forcepurgeplot` | Synonym for `purgeplot` (live spawns + records; native objects never touched). The old chain sweep was removed — it could delete native resources |
 | `.uriel purgeorphans` | Server-wide cleanup: scan the whole map and remove orphaned Uriel objects (castle gone / no living heart governing them). Backup for the boot-time orphan purge |
 | `.uriel bossmap add\|remove\|list <vblood> <obj>` | Curate which objects a V-blood defeat unlocks |
 | `.uriel api version\|catalog\|unlocked` | `[URIEL:*]` machine API for BloodCraftHub |

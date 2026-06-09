@@ -666,6 +666,36 @@ that's how they were found) or `.uriel purgeplot`. **⏳ Live tests:** (1) `.uri
 `.uriel spawn ..._Original` → now refused as "not a placeable world object"; (2) the catalog count drops
 by the non-networked set; (3) a normal decor/resource-node spawn still works and renders.
 
+### 🛑 v0.18.1 hotfixes — container spawn crash, forcepurge native-resource deletion, IL2CPP type guard (2026-06-09)
+
+**Container spawn = server crash (`DropInInventoryOnSpawn`).** Spawning `TM_Bookshelf_01_Full` aborted the
+whole server (`AppendRemovedComponentRecordError` from a Burst job) — in BOTH the adopted and
+`playerBreakable` paths, so it's spawn-time logic, not adoption. Cause: pre-filled "_Full" containers carry
+`DropInInventoryOnSpawn` and populate their inventory THE MOMENT they spawn; grafted in outside the normal
+placement pipeline, that inventory/chain logic crashes. `IsNonObject` now excludes
+`DropInInventoryOnSpawn` (the **causal** component — covers all ~60 `_Full`/loot containers structurally,
+present and future). **NOT** `ExternalInventoryStartItems`: it's on ~376 prefabs incl. every crafting
+station / wardrobe / research station / prison cell, which DEFER generation and spawn fine. The
+chest-vs-bookshelf distinction (tester): locked/deferred containers (`ExternalInventoryStartItems` only)
+are safe; open ones (`DropInInventoryOnSpawn`) crash. `ReapplySpawned` now also DROPS records for any
+now-blocked prefab on boot (without touching live entities), self-healing leftover hazard records.
+*Future option:* strip `DropInInventoryOnSpawn` right after instantiate so these spawn EMPTY instead of
+being blocked — not built (component surgery on a crash-prone entity; needs careful testing).
+
+**`forcepurgeplot` deleted 315 native resources — SpawnChainChild sweep REMOVED.** The 0.18.0 "strong"
+tier swept all `SpawnChainChild` entities on the plot, on the false assumption it was a Uriel-only marker.
+It is the GAME's resource-respawn marker (every regrowing plant/rock/tree has it), so the sweep destroyed
+native resource nodes/controllers. The sweep is gone; `PurgePlotCore` is now marker + registry only, and
+`forcepurgeplot` is a plain synonym for `purgeplot`. There is no safe structural marker for an UNtracked
+Uriel object, so bulk recovery isn't offered — aim + `.uriel forcedespawn` per object.
+
+**Catalog build crash from an unregistered IL2CPP type.** A first cut of the container filter used
+`Has<ExternalInventoryStartItems>()`; that type is an unregistered IL2CPP generic/buffer, so `Has<T>()`
+THREW, aborting the whole catalog build and spamming BCH's `.uriel api version` probe. Lesson: a `Has<T>()`
+on an unregistered type is fatal to the catalog. The container check now goes through a guarded one-time
+probe (`HasDropInInventoryOnSpawn`) that disables itself (logged) on throw instead of breaking the catalog;
+any future component check added to `IsNonObject` should use the same pattern.
+
 ## Phase 2 — player access: mode + discovery + cost (BUILT Session 6, 2026-06-08; awaiting live test)
 
 **Status:** built & deployed. New files `Services/PlayerUnlockService.cs` (per-player

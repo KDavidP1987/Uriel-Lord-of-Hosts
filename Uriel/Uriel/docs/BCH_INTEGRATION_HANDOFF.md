@@ -238,9 +238,10 @@ by `guid`; `cat` = a coarse category for grouping + fallback icons, one of
 - Object MANAGEMENT (placed objects, plain-text replies — not `[URIEL:*]`): `.uriel despawn`/
   `move`/`rotate`/`spawninfo`/`spawnlist` (player, own plot), `.uriel purgeplot` (admin). These
   re-resolve the target from Uriel's spawned-object registry on demand, so they work across
-  relog/restart. `.uriel purgeplot` is the LIGHT plot purge (in-session live-spawn marker +
-  persistent records); `.uriel forcepurgeplot` is the STRONG one (adds a legacy `SpawnChainChild`
-  chain sweep). Both touch only Uriel's objects — native objects/plants/build pieces are never
+  relog/restart. `.uriel purgeplot` removes Uriel's objects on the plot (in-session live-spawn marker
+  + persistent records); `.uriel forcepurgeplot` is now a SYNONYM for it (the old `SpawnChainChild`
+  chain sweep was removed — that component is the game's resource-respawn marker, and the sweep deleted
+  native resources). Both touch only Uriel's objects — native objects/plants/build pieces are never
   removed. `.uriel purgeorphans` (admin) is a server-wide sweep that removes tracked objects no
   longer governed by a living castle heart (castle destroyed / open world). Admin record-IGNORING
   per-object recovery: `.uriel forcedespawn [confirm]` (arm → names the prefab → confirm within

@@ -218,9 +218,9 @@ In **Discovery** mode you unlock objects by **destroying them in the world**; th
 | `.uriel grant\|revoke <player> <name\|guid>` | Unlock / remove an object for a player |
 | `.uriel grantall <player> [all\|destructible\|indestructible]` | Bulk-grant the catalog (or a subset) |
 | `.uriel block\|unblock <guid>` · `.uriel blocklist` | Forbid / allow a prefab |
-| `.uriel spawnlist` · `.uriel purgeplot` | List / **light-clear** spawned objects on the plot (live spawns + records; native objects never touched) |
+| `.uriel spawnlist` · `.uriel purgeplot` | List / clear spawned objects on the plot (live spawns + records; native objects never touched) |
 | `.uriel forcedespawn [confirm]` | Force-remove the aimed object, ignoring records/ownership (recovers untracked objects); names it, then `confirm` within 30s |
-| `.uriel forcepurgeplot` | **Strong purge** — everything `purgeplot` does plus a legacy chain-spawn sweep. Native objects, plants, trees, and build pieces are left untouched |
+| `.uriel forcepurgeplot` | Synonym for `purgeplot` (live spawns + records; native objects never touched). The old chain sweep was removed — it could delete native resources |
 | `.uriel purgeorphans` | **Server-wide cleanup** — scan the whole map and remove orphaned Uriel objects (castle gone, or no living heart governing them). Only Uriel's objects are touched; a backup for the automatic boot-time cleanup |
 | `.uriel bossmap add\|remove\|list <vblood> <obj>` | Curate which objects a V-blood defeat unlocks |
 | `.uriel api version\|catalog\|unlocked` | Machine API for BloodCraftHub |

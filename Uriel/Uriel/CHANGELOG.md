@@ -3,6 +3,21 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.18.1 (2026-06-09)
+
+Critical hotfixes from live testing of 0.18.0:
+
+- **Fix: spawning a pre-filled container no longer crashes the server.** Some containers (e.g. the
+  "Full" bookshelves/drawers/cabinets and loot chests) try to generate their contents the instant they
+  spawn, which crashed the whole server. They're now kept out of the spawn catalog. **Crafting stations,
+  wardrobes, empty containers, and everything else are unaffected** — you can still place an empty
+  container and fill it yourself.
+- **Fix (important): `.uriel forcepurgeplot` no longer removes native objects.** In 0.18.0 it could
+  delete a plot's natural resource nodes/trees. It now does exactly what `.uriel purgeplot` does — only
+  Uriel's own objects, never anything native.
+- **Fix: object catalog / BloodCraftHub handshake no longer spams errors.** A bad internal type check
+  broke the catalog and flooded the log on `.uriel api version`; resolved.
+
 ## 0.18.0 (2026-06-09)
 
 - **New: objects can't be stacked inside each other or inside walls.** A placement guard

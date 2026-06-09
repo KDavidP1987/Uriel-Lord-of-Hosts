@@ -355,10 +355,21 @@ internal sealed class ObjectSpawnService
 
         var index = BuildLiveIndex();
         bool purgeOrphans = Settings.ObjectSpawn_PurgeOrphansOnBoot.Value;
-        int restored = 0, orphaned = 0, unresolved = 0;
+        int restored = 0, orphaned = 0, unresolved = 0, hazardDropped = 0;
         bool changed = false;
         foreach (var r in new List<SpawnRecord>(_records))
         {
+            // A prefab that a newer build has BLOCKED (e.g. the crash-hazard "_Full" containers) must not be
+            // re-applied or re-resolved — forget its record. We deliberately do NOT touch any live entity
+            // here (don't risk re-triggering the hazard); the game manages whatever exists, and the player
+            // can remove it normally. This self-heals records left over from before the block landed.
+            if (!IsRealPlaceableObject(r.PrefabGuid))
+            {
+                _records.Remove(r);
+                hazardDropped++;
+                changed = true;
+                continue;
+            }
             Entity e = index.Resolve(r);
             if (e == Entity.Null)
             {
@@ -392,7 +403,7 @@ internal sealed class ObjectSpawnService
         }
         if (changed) SaveSync();
         Core.Log.LogInfo($"[Uriel SPAWN] re-applied {restored} object(s); {orphaned} orphan(s) purged (castle gone); " +
-                         $"{unresolved} not resolved this boot (KEPT — may be streaming in).");
+                         $"{hazardDropped} now-blocked record(s) dropped; {unresolved} not resolved this boot (KEPT — may be streaming in).");
     }
 
     // ============================================================ auto-respawn loop
@@ -719,8 +730,43 @@ internal sealed class ObjectSpawnService
         // otherwise lets them pass IsPlaceableObject), and V Bloods additionally carry VBloodConsumeSource.
         // MicroPOI controllers carry MicroPOIInstance; roof tiles carry CastleRoofOrnaments (render only at
         // height, invisible at ground). A real placeable world object has none of these — robust to renames.
+        //
+        // CRASH HAZARD — `DropInInventoryOnSpawn` is the CAUSAL component: the container drops its start
+        // items into its inventory THE MOMENT IT SPAWNS. Grafted in outside the normal placement pipeline,
+        // that spawn-time inventory/chain logic runs in a Burst job and ABORTS THE SERVER
+        // (`AppendRemovedComponentRecordError`, observed 2026-06-09 spawning TM_Bookshelf_01_Full — crashes
+        // in BOTH the adopted and playerBreakable paths, so it's the spawn-time logic, not adoption).
+        // Filtering by this single component covers the WHOLE class structurally — all 60 "_Full" /
+        // loot containers (open bookshelves, shelves, drawers, cabinets, carriage/world chests, sarcophagi,
+        // grape barrels), present and future, without enumerating names.
+        // Deliberately NOT `ExternalInventoryStartItems`: that is on ~376 prefabs incl. EVERY crafting
+        // station, wardrobe, research station, and prison cell — they DEFER generation (recipe/on-use) and
+        // spawn fine, so blocking it would gut the catalog. (It is ALSO an unregistered IL2CPP generic/buffer
+        // type whose `Has<T>()` THROWS — which once aborted the whole catalog build and spammed BCH's version
+        // probe, 2026-06-09.) Resource-node templates carry neither; empty containers stay placeable.
         return prefab.Has<Movement>() || prefab.Has<VBloodConsumeSource>()
-            || prefab.Has<MicroPOIInstance>() || prefab.Has<CastleRoofOrnaments>();
+            || prefab.Has<MicroPOIInstance>() || prefab.Has<CastleRoofOrnaments>()
+            || HasDropInInventoryOnSpawn(prefab);
+    }
+
+    // Guarded probe for the container crash-filter. Some V Rising components (esp. generic/buffer types)
+    // are NOT registered in the IL2CPP TypeManager, so `Has<T>()` THROWS — and an unhandled throw inside the
+    // catalog build aborts the WHOLE catalog (it did, 2026-06-09: ExternalInventoryStartItems left the
+    // catalog empty and spammed `.uriel api version`). DropInInventoryOnSpawn is verified usable, but we
+    // probe it ONCE and, if it ever throws, disable just this one check (logged) rather than break the
+    // catalog. Any future component check added here should use the same guarded pattern.
+    static bool _dropInInvUsable = true;
+    static bool HasDropInInventoryOnSpawn(Entity prefab)
+    {
+        if (!_dropInInvUsable) return false;
+        try { return prefab.Has<DropInInventoryOnSpawn>(); }
+        catch (Exception ex)
+        {
+            _dropInInvUsable = false;
+            Core.Log.LogWarning($"[Uriel SPAWN] DropInInventoryOnSpawn check unavailable ({ex.Message}); " +
+                                "container crash-filter disabled this session (catalog still builds).");
+            return false;
+        }
     }
 
     /// <summary>Structural "is this a real placeable WORLD object?" test for an arbitrary GUID — the
@@ -1917,15 +1963,17 @@ internal sealed class ObjectSpawnService
     ///   (2) REGISTRY (`_records`): records on this plot resolved to their live entity — the persistent
     ///       source of truth, so this is what works after a restart (when the live marker is empty until
     ///       a re-apply repopulates it). Records are dropped whether or not the entity currently resolves.
-    ///   (3) CHAIN (STRONG only): legacy `SpawnChainChild` spawns with no record, plot-scoped — the one
-    ///       structural marker no native object carries.
-    /// The deliberately-removed heuristics (Immortal / CastleHeartConnection==heart) are NOT here: native
-    /// garden plants and claimed trees share them, which is what caused the ~2000-object over-deletion.
+    /// Both tiers act ONLY on objects Uriel actually spawned — NEVER a broad world scan. The previously-
+    /// removed heuristics (Immortal / CastleHeartConnection==heart) and the `SpawnChainChild` sweep are all
+    /// gone: each matched NATIVE objects. (`SpawnChainChild` in particular is the GAME's resource-respawn
+    /// marker — a `forcepurgeplot` sweep on it deleted 315 native resource nodes/trees on a tester's plot,
+    /// 2026-06-09. There is no safe structural marker for an UNtracked Uriel object, so we no longer try;
+    /// per-object recovery is `.uriel forcedespawn`.)
     /// </summary>
-    (int marker, int tracked, int chains) PurgePlotCore(Entity heart, int territory, bool strong)
+    (int marker, int tracked) PurgePlotCore(Entity heart, int territory)
     {
         var blocks = GetPlotBlocks(heart);
-        int marker = 0, tracked = 0, chains = 0;
+        int marker = 0, tracked = 0;
 
         // (1) Live marker set — direct, in-session. Needs territory blocks to scope to THIS plot.
         if (blocks.Count > 0)
@@ -1949,32 +1997,8 @@ internal sealed class ObjectSpawnService
             _records.Remove(r);
         }
 
-        // (3) STRONG only — legacy untracked chain spawns within this plot's blocks.
-        if (strong && blocks.Count > 0)
-        {
-            var builder = new EntityQueryBuilder(Allocator.Temp)
-                .AddAll(new(Il2CppType.Of<SpawnChainChild>(), ComponentType.AccessMode.ReadOnly))
-                .AddAll(new(Il2CppType.Of<Translation>(), ComponentType.AccessMode.ReadOnly))
-                .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
-            var query = Core.EntityManager.CreateEntityQuery(ref builder);
-            var entities = query.ToEntityArray(Allocator.Temp);
-            try
-            {
-                for (int i = 0; i < entities.Length; i++)
-                {
-                    var e = entities[i];
-                    if (e.Has<CastleHeart>()) continue;
-                    if (!e.TryGetComponent<Translation>(out var tr)) continue;
-                    if (!blocks.Contains(BlockKey(ConvertPosToBlockCoord(tr.Value)))) continue;
-                    DestroySpawned(e); // also tears down the looping chain controller
-                    chains++;
-                }
-            }
-            finally { entities.Dispose(); }
-        }
-
         SaveSync();
-        return (marker, tracked, chains);
+        return (marker, tracked);
     }
 
     /// <summary>LIGHT purge — remove Uriel's objects on the plot you're standing in via the live marker +
@@ -1987,11 +2011,11 @@ internal sealed class ObjectSpawnService
         if (!TryResolvePlot(pos, out Entity heart, out int territory))
         { message = "You're not standing in a castle plot."; return false; }
 
-        var (marker, tracked, _) = PurgePlotCore(heart, territory, strong: false);
+        var (marker, tracked) = PurgePlotCore(heart, territory);
         int removed = marker + tracked;
         Core.Log.LogInfo($"[Uriel SPAWN] purged {removed} object(s) ({marker} marker + {tracked} record) from territory {territory}.");
         message = removed == 0
-            ? "No Uriel-spawned objects on this plot to purge. (If a stray persists, try '.uriel forcepurgeplot'.)"
+            ? "No Uriel-spawned objects on this plot to purge. (For one specific untracked object, aim at it and use '.uriel forcedespawn'.)"
             : $"Purged {removed} Uriel-spawned object(s) from this plot. Native objects were left untouched.";
         return true;
     }
@@ -2182,14 +2206,12 @@ internal sealed class ObjectSpawnService
     }
 
     /// <summary>
-    /// STRONG purge (admin) — everything the LIGHT '.uriel purgeplot' does (live marker + registry) PLUS
-    /// a legacy <c>SpawnChainChild</c> chain-spawn sweep on the plot. Uses ONLY signals unambiguously
-    /// Uriel's; it deliberately does NOT sweep by Immortal or CastleHeartConnection==heart — adoption
-    /// (ExecuteSpawn) copies those VANILLA components onto our objects, but native garden plants,
-    /// castle-claimed trees/flowers, and world props inside the plot carry them too, so an earlier
-    /// heart-connection sweep deleted ~2000 native objects on a tester's plot (reported 2026-06-09).
-    /// A truly-untracked, non-chain Uriel object (record lost AND not in this session's live marker) is
-    /// not bulk-removable here by design; aim at it and use '.uriel forcedespawn' (per-object, safe).
+    /// Admin plot purge — removes Uriel's objects on the plot via the live marker + the persistent
+    /// registry, exactly like '.uriel purgeplot'. (Retained as a separate command for muscle memory; the
+    /// old "STRONG" `SpawnChainChild` sweep was REMOVED — that component is the GAME's resource-respawn
+    /// marker, not a Uriel tag, and the sweep destroyed 315 native resource nodes/trees on a tester's plot,
+    /// 2026-06-09. There is no safe way to bulk-remove an UNtracked Uriel object; aim at one specific object
+    /// and use '.uriel forcedespawn' instead.)
     /// </summary>
     public bool ForcePurgePlot(Entity character, out string message)
     {
@@ -2198,13 +2220,12 @@ internal sealed class ObjectSpawnService
         if (!TryResolvePlot(pos, out Entity heart, out int territory))
         { message = "You're not standing in a castle plot."; return false; }
 
-        var (marker, tracked, chains) = PurgePlotCore(heart, territory, strong: true);
-        int removed = marker + tracked + chains;
-        Core.Log.LogInfo($"[Uriel SPAWN] force-purged {removed} object(s) ({marker} marker + {tracked} record + {chains} legacy chain) from territory {territory} by admin {character.GetSteamId()}.");
+        var (marker, tracked) = PurgePlotCore(heart, territory);
+        int removed = marker + tracked;
+        Core.Log.LogInfo($"[Uriel SPAWN] force-purged {removed} object(s) ({marker} marker + {tracked} record) from territory {territory} by admin {character.GetSteamId()}.");
         message = removed == 0
-            ? "No Uriel objects found on this plot (nothing native was touched)."
-            : $"Force-purged {removed} Uriel object(s) on this plot ({marker} marker + {tracked} record + {chains} legacy chain). " +
-              "Native objects, plants, trees, and build pieces were left untouched.";
+            ? "No Uriel objects found on this plot (nothing native was touched). For one specific untracked object, aim at it and use '.uriel forcedespawn'."
+            : $"Removed {removed} Uriel object(s) on this plot ({marker} marker + {tracked} record). Native objects, plants, trees, and build pieces were left untouched.";
         return true;
     }
 

@@ -96,7 +96,7 @@ internal static class ObjectCommands
         ctx.Reply(Core.ObjectSpawn.ListOnPlot(ctx.Event.SenderCharacterEntity));
     }
 
-    [Command("purgeplot", description: "Light purge: remove Uriel's objects on the castle plot you're standing in (live spawns + tracked records). Native objects are never touched. If a stray survives, escalate to '.uriel forcepurgeplot'. Usage: .uriel purgeplot", adminOnly: true)]
+    [Command("purgeplot", description: "Remove Uriel's objects on the castle plot you're standing in (live spawns + tracked records). Native objects are never touched. For one specific untracked object, aim at it and use '.uriel forcedespawn'. Usage: .uriel purgeplot", adminOnly: true)]
     public static void PurgePlot(ChatCommandContext ctx)
     {
         if (!Ready(ctx)) return;
@@ -120,7 +120,7 @@ internal static class ObjectCommands
         ctx.Reply(message);
     }
 
-    [Command("forcepurgeplot", description: "Strong purge: everything '.uriel purgeplot' does (live spawns + records) PLUS a legacy chain-spawn sweep. Native objects, plants, trees, and build pieces are left untouched. (Untracked non-chain leftovers: aim + '.uriel forcedespawn'.) Usage: .uriel forcepurgeplot", adminOnly: true)]
+    [Command("forcepurgeplot", description: "Same as '.uriel purgeplot' — removes Uriel's objects on the plot (live spawns + records); native objects/plants/trees/build pieces are never touched. (Kept as a synonym; the old chain sweep was removed because it could delete native resources.) Usage: .uriel forcepurgeplot", adminOnly: true)]
     public static void ForcePurgePlot(ChatCommandContext ctx)
     {
         if (!Ready(ctx)) return;

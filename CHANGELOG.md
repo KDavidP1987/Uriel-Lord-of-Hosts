@@ -8,6 +8,41 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.18.1] - 2026-06-09
+
+Critical hotfixes for Object Spawning found in live testing of 0.18.0. All in
+`ObjectSpawnService.cs`; no other features affected.
+
+### Fixed — server crash spawning pre-filled containers
+
+- Spawning a `_Full` container (e.g. `TM_Bookshelf_01_Full`) **aborted the entire server** with
+  `AppendRemovedComponentRecordError` from a Burst job. Cause: these prefabs carry
+  `DropInInventoryOnSpawn` — they populate their inventory THE MOMENT they spawn — and run that
+  spawn-time inventory/chain logic on the grafted entity outside the normal placement pipeline.
+  Confirmed in BOTH the adopted and `playerBreakable` paths, so it's the spawn-time logic, not adoption.
+- `IsNonObject` now excludes `prefab.Has<DropInInventoryOnSpawn>()` — the single causal component covers
+  the whole class structurally (~60 `_Full`/loot containers: bookshelves, shelves, drawers, cabinets,
+  carriage/world chests, sarcophagi, grape barrels), present and future, without enumerating names.
+  Deliberately NOT `ExternalInventoryStartItems` (on ~376 prefabs incl. every crafting station, wardrobe,
+  research station, prison cell — those DEFER generation and spawn fine; blocking it would gut the catalog).
+- **Boot self-heal:** `ReapplySpawned` now drops registry records for any prefab a newer build has blocked
+  (without touching live entities), so leftover hazard records can't linger or re-trigger.
+
+### Fixed — `forcepurgeplot` deleted native world resources
+
+- The "strong" `SpawnChainChild` sweep added in 0.18.0 destroyed **315 native resource nodes/trees** on a
+  tester's plot. `SpawnChainChild` is the GAME's resource-respawn marker, NOT a Uriel tag — the assumption
+  behind the sweep was wrong. The sweep is **removed entirely**. `.uriel forcepurgeplot` now does exactly
+  what `.uriel purgeplot` does (live marker + persistent registry — Uriel's own objects only) and can never
+  touch native objects. Bulk removal of an UNtracked object is no longer offered; aim + `.uriel forcedespawn`.
+
+### Fixed — catalog build crash from an unregistered IL2CPP type
+
+- A first attempt at the container filter used `Has<ExternalInventoryStartItems>()`; that type is an
+  unregistered IL2CPP generic/buffer, so `Has<T>()` THREW, aborting the whole catalog build and spamming
+  BCH's `.uriel api version` handshake. Removed it; added a guarded one-time probe (`HasDropInInventoryOnSpawn`)
+  so any unregistered component check disables itself (logged) instead of breaking the catalog.
+
 ## [0.18.0] - 2026-06-09
 
 Object Spawning stability pass — placement overlap guard, an invisible/hazardous-prefab
