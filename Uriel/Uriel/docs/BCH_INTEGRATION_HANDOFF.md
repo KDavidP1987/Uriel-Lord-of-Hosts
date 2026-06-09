@@ -218,6 +218,13 @@ by `guid`; `cat` = a coarse category for grouping + fallback icons, one of
 
 - `catalog` = the **total prefab list available in-game** (placeable WORLD objects; excludes units,
   abilities, internals, admin-blocked, and — unless `IncludeCastleBuildables=true` — castle build pieces).
+  **The catalog is curated to RENDER-SAFE objects** (added 2026-06-09, v0.18.x): Uriel also filters out
+  prefabs that spawn **invisibly** (non-networked world-gen "source" geometry, `MicroPOI*` POI/unit-spawner
+  controllers, roof tiles that only render at height, and `InvisibleObject_*`/`IdleInteractionLocation_*`
+  position markers) and prefabs that **crash the server on spawn** (`DropInInventoryOnSpawn` pre-filled
+  "_Full" containers). **No BCH change is needed** — the wire format is unchanged; the catalog simply
+  contains fewer, valid objects. The set is still being refined as testers report bad prefabs, so the
+  catalog (and `total`/`discoverable`) can shrink slightly between mod versions.
 - `unlocked` = the **calling player's** unlocked prefabs + collection `pct` (of the discoverable set;
   blocked/invalid never counted). Self-scoped; admins read others via chat `.uriel unlocks <player>`.
 - `version`: `collection` master on/off; `mode`/`chance` = discovery rules; `blocked` = blocklist size.
