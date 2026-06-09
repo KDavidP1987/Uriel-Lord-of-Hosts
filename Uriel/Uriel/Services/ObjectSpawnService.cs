@@ -717,14 +717,23 @@ internal sealed class ObjectSpawnService
     static readonly string[] NonObjectPrefixes =
         { "CHAR_", "AB_", "GM_", "Liquid_", "Summon", "USB_", "PrefabVariant", "MicroPOI" };
 
+    // Substring tokens for invisible/non-render position-marker families (matched case-insensitively;
+    // these lead with TM_ so it's a substring test, not a prefix). Add new confirmed marker families here.
+    static readonly string[] InvisibleMarkerFragments = { "InvisibleObject", "IdleInteractionLocation" };
+
     static bool IsNonObject(string name, Entity prefab)
     {
         foreach (var p in NonObjectPrefixes)
             if (name.StartsWith(p, StringComparison.OrdinalIgnoreCase)) return true;
-        // Invisible AI/POI position markers (TM_InvisibleObject_*): substring, not prefix (the TM_ leads).
-        // NB: deliberately NOT "Invisible" alone — invisible castle walls/floors (TM_Castle_*_Invisible)
-        // are legitimate build pieces filtered elsewhere; only the *Object* markers are caught here.
-        if (name.IndexOf("InvisibleObject", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+        // Invisible / non-render position markers — networked (so NetworkId passes) but no mesh:
+        //  - TM_InvisibleObject_*  : AI / boss position markers (fishing spots, Dracula/Morgana positions).
+        //    NB: deliberately NOT "Invisible" alone — invisible castle walls/floors (TM_Castle_*_Invisible)
+        //    are legit build pieces filtered elsewhere; only the *Object* markers are caught here.
+        //  - TM_IdleInteractionLocation_* : NPC idle-animation spots (Tinker/Fishing/Digging/…, 16; reported
+        //    invisible 2026-06-09). Matches "...Location" specifically — the *_IdleInteraction SUFFIX props
+        //    (braziers, target dummies, mine cart) are REAL visible objects and lack the "Location" token.
+        foreach (var frag in InvisibleMarkerFragments)
+            if (name.IndexOf(frag, StringComparison.OrdinalIgnoreCase) >= 0) return true;
         // Component backstop — catches units the name filter could miss. EVERY character/NPC carries
         // Movement (verified across the CHAR_* dump: all 532 have it, alongside TilePosition which
         // otherwise lets them pass IsPlaceableObject), and V Bloods additionally carry VBloodConsumeSource.

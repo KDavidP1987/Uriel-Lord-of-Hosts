@@ -73,6 +73,11 @@ build cost, block specific objects, and grant objects directly.
 > optional **BloodCraftHub** companion can present a point-and-click palette UI.
 
 > **🧪 Pre-1.0 guidance & quick tips (Object Spawning):**
+> - **Not every spawnable object has been individually tested.** The game ships
+>   thousands of prefabs; some may misbehave when placed as décor (spawn invisible,
+>   or not function). This is a big reason Uriel is **pre-1.0**, and exactly why
+>   **we're asking for feedback** — every broken object you report goes onto the
+>   block list for the next release.
 > - **Hazardous/problematic prefabs are blocked from spawning.** The game's object
 >   list contains many entries that aren't real placeable décor (world-gen
 >   controllers, NPC-spawner "points of interest", invisible markers, baked

@@ -646,8 +646,14 @@ So the filter is surgical: it removes the invisible class and keeps everything t
 
 **Belt-and-suspenders name/component filters (`IsNonObject`):** `MicroPOI*` (all 85 are POI/territory
 spawner controllers — kept out independently of networking because of the embedded **unit spawner**
-hazard), `*InvisibleObject*` markers, and a `MicroPOIInstance` component backstop. Redundant with the
-`NetworkId` gate for most, but explicit and cheap.
+hazard), a `MicroPOIInstance` component backstop, and an extensible list of invisible-marker name tokens
+(`InvisibleMarkerFragments`): `InvisibleObject` (AI/boss position markers) and `IdleInteractionLocation`
+(v0.18.2 — `TM_IdleInteractionLocation_*`, 16 NPC idle-animation spots; networked so `NetworkId` passes,
+but no render mesh. Matches `...Location` only, so the visible `*_IdleInteraction` SUFFIX props — braziers,
+target dummies, mine cart — are NOT caught). Redundant with the `NetworkId` gate for some, but explicit and
+cheap. **Open candidate:** `*_Zone_Area*` gameplay-effect volumes (garlic/holy/corruption/cursed/stealth
+damage zones; dense-cloud fog) — invisible non-décor markers, left pending an owner decision on whether to
+also block the borderline atmospheric cloud zones.
 
 **Context-only building pieces — ROOF TILES (2026-06-09, second live report).** `NetworkId` does NOT catch
 these: roof tiles ARE networked, but the roof system only renders them at a HEIGHT above walls — dropped at

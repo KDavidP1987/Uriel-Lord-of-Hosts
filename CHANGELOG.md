@@ -8,6 +8,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.18.2] - 2026-06-09
+
+### Fixed — more invisible markers filtered out
+
+- `TM_IdleInteractionLocation_*` (16: Tinker/Fishing/Digging/Campfire/Lookout/Raking/Sowing/…) spawn
+  **invisible** — they're networked (so the `NetworkId` gate passes) but are pure NPC idle-animation
+  position markers with no render mesh. `IsNonObject` now filters the `IdleInteractionLocation` name token.
+  Matches `...Location` specifically, so the real visible `*_IdleInteraction` SUFFIX props (braziers,
+  target dummies, mine cart) are NOT affected. Invisible-marker name tokens are now a small extensible list
+  (`InvisibleMarkerFragments` = `InvisibleObject`, `IdleInteractionLocation`).
+- Audit note: `*_Zone_Area*` gameplay-effect volumes (garlic/holy/corruption/cursed/stealth damage zones,
+  dense-cloud fog) are candidate invisible/non-décor markers, left in pending an owner decision.
+
+### Docs
+
+- Thunderstore README: explicit note that **not every spawnable object has been individually tested** — a
+  core reason Uriel is pre-1.0 and why object feedback is requested.
+
 ## [0.18.1] - 2026-06-09
 
 Critical hotfixes for Object Spawning found in live testing of 0.18.0. All in

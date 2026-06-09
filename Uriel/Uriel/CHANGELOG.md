@@ -3,6 +3,14 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.18.2 (2026-06-09)
+
+- **Fix: more invisible objects filtered out.** NPC idle-animation spot markers
+  (`IdleInteractionLocation` — Tinker/Fishing/Digging/etc., 16 of them) spawned invisible; they're now
+  kept out of the catalog. Real visible objects (braziers, target dummies, etc.) are unaffected.
+- **Note:** not every spawnable object has been individually tested — if you find one that spawns
+  invisible or misbehaves, `.uriel despawn` it and report it so it can be blocked.
+
 ## 0.18.1 (2026-06-09)
 
 Critical hotfixes from live testing of 0.18.0:
