@@ -30,28 +30,37 @@ internal static class ObjectCommands
         return true;
     }
 
-    [Command("spawn", description: "Spawn a prefab in the castle plot you're in. Flags (any order, AFTER the rotation slot): 'breakable' (raid/decay can destroy it), 'smashable' (you can destroy it too), 'respawn' (auto-comes-back until the castle's gone or you despawn it), 'here'/'nearest' (place at YOUR location — use this from a UI button), 'indestructible'. Default indestructible. Usage: .uriel spawn <name|guid> [rot 0-3] [flags…]. Players: own plot only; admins: any plot.")]
-    public static void Spawn(ChatCommandContext ctx, string prefab, int rotation = 0,
-                             string f1 = null, string f2 = null, string f3 = null, string f4 = null)
+    [Command("spawn", description: "Spawn a prefab in the castle plot you're in. After the name, the rotation (0-3) and any flags may appear IN ANY ORDER: 'breakable' (raid/decay can destroy it), 'smashable' (you can destroy it too), 'respawn' (auto-comes-back until the castle's gone or you despawn it), 'here'/'nearest' (place at YOUR location — use this from a UI button), 'indestructible'. Admin-only 'force' spawns a non-networked object (e.g. an effect zone) that would otherwise be refused — it may be INVISIBLE. Default indestructible. Usage: .uriel spawn <name|guid> [rot 0-3] [flags…]. Players: own plot only; admins: any plot.")]
+    public static void Spawn(ChatCommandContext ctx, string prefab, string a1 = null, string a2 = null,
+                             string a3 = null, string a4 = null, string a5 = null, string a6 = null)
     {
         if (!Ready(ctx)) return;
+        int rotation = 0;
+        bool rotSet = false;
         bool? breakable = null;
-        bool playerBreakable = false, respawn = false, atFeet = false;
-        foreach (var raw in new[] { f1, f2, f3, f4 })
+        bool playerBreakable = false, respawn = false, atFeet = false, force = false;
+        // Tokens after the name are order-independent: the FIRST integer is the rotation; everything else is
+        // a flag. (Previously the rotation was a fixed int parameter, so a flag typed right after the name —
+        // e.g. ".uriel spawn <guid> force" — landed in the rotation slot, failed to parse, and the command
+        // silently did nothing. Parsing all trailing tokens as strings fixes that.)
+        foreach (var raw in new[] { a1, a2, a3, a4, a5, a6 })
         {
             string f = raw?.Trim();
             if (string.IsNullOrEmpty(f)) continue;
+            if (!rotSet && int.TryParse(f, out int r)) { rotation = r & 3; rotSet = true; continue; }
             if ("breakable".Equals(f, StringComparison.OrdinalIgnoreCase)) breakable = true;
             else if ("indestructible".Equals(f, StringComparison.OrdinalIgnoreCase)) breakable = false;
             else if ("smashable".Equals(f, StringComparison.OrdinalIgnoreCase)
                   || "smash".Equals(f, StringComparison.OrdinalIgnoreCase)
                   || "playerbreakable".Equals(f, StringComparison.OrdinalIgnoreCase)) { breakable = true; playerBreakable = true; }
             else if ("respawn".Equals(f, StringComparison.OrdinalIgnoreCase)) respawn = true;
+            else if ("force".Equals(f, StringComparison.OrdinalIgnoreCase)
+                  || "allowinvisible".Equals(f, StringComparison.OrdinalIgnoreCase)) force = true;
             else if (IsAtFeetToken(f)) atFeet = true;
             // unknown tokens are ignored (forward-compatible)
         }
         Core.ObjectSpawn.Spawn(ctx.Event.SenderCharacterEntity, ctx.Event.User.IsAdmin, prefab, rotation,
-                               breakable, playerBreakable, respawn, atFeet, out string message);
+                               breakable, playerBreakable, respawn, atFeet, force, out string message);
         ctx.Reply(message);
     }
 
@@ -224,6 +233,29 @@ internal static class ObjectCommands
     {
         if (!Ready(ctx)) return;
         ctx.Reply(Core.ObjectSpawn.DescribeBlocked());
+    }
+
+    [Command("objcfg", description: "Admin: set spawn conditions for ONE object (players only; admins bypass). Fields: max <n> (max per plot, 0=unlimited) | cost <amount> <itemGuid> (0=free) | indestructible <true|false> | respawn <true|false> | clear | show. Usage: .uriel objcfg <name|guid> <field> [v1] [v2]", adminOnly: true)]
+    public static void ObjCfg(ChatCommandContext ctx, string prefab, string field = "show", string v1 = null, string v2 = null)
+    {
+        if (!Ready(ctx)) return;
+        Core.ObjectSpawn.ConfigureObject(prefab, field, v1, v2, out string message);
+        ctx.Reply(message);
+    }
+
+    [Command("objcfgglobal", description: "Admin: set the GLOBAL DEFAULT spawn condition applied to every object unless that object overrides it (players only). Same fields as objcfg. Usage: .uriel objcfgglobal <field> [v1] [v2]", adminOnly: true)]
+    public static void ObjCfgGlobal(ChatCommandContext ctx, string field = "show", string v1 = null, string v2 = null)
+    {
+        if (!Ready(ctx)) return;
+        Core.ObjectSpawn.ConfigureGlobal(field, v1, v2, out string message);
+        ctx.Reply(message);
+    }
+
+    [Command("objcfglist", description: "Admin: list the global + per-object spawn conditions. Usage: .uriel objcfglist", adminOnly: true)]
+    public static void ObjCfgList(ChatCommandContext ctx)
+    {
+        if (!Ready(ctx)) return;
+        ctx.Reply(Core.ObjectSpawn.DescribeAllConditions());
     }
 
     [Command("bossmap", description: "Admin: edit the boss->object unlock map (defeating the V-blood grants the objects). Usage: .uriel bossmap <add|remove|list> [vblood] [object]", adminOnly: true)]

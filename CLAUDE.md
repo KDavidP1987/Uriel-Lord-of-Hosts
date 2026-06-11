@@ -162,7 +162,7 @@ are backstops; **this CLAUDE.md rule is the authoritative process.**
 ## BCH integration handoff — keep it current
 
 `Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md` is the **living contract**
-BloodCraftHub (the client-side companion mod, separate workspace at
+BloodCraftHub — now published on Thunderstore as **Raphael** — (the client-side companion mod, separate workspace at
 `..\..\BloodCraftUI 2\`) builds against: the chat-command surface, the reply
 shapes BCH parses, the replicated state markers that identify shared
 containers client-side (§2 of the doc), config keys, and the future

@@ -3,6 +3,33 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.19.0 (2026-06-10)
+
+- **New (admin): per-object & global spawn conditions.** Control how players may spawn objects —
+  set a **max number per plot**, an **item cost** (per object, or a global default for everything),
+  and whether players may make a given object **indestructible** or **auto-respawning**:
+  `.uriel objcfg <object> max 3`, `.uriel objcfg <object> cost 100 <itemId>`, `.uriel objcfg <object>
+  indestructible false`, plus `.uriel objcfgglobal …` for the defaults and `.uriel objcfglist` to
+  review them. Admins themselves are never restricted; with nothing set, behavior is unchanged.
+- **Fix: you can no longer build on a plot you've abandoned.** Once a castle is abandoned, relinquished,
+  or fully decayed, placing/moving objects there is refused — there's no owner to attach them to.
+- **Fix: objects on an abandoned/destroyed castle are cleaned up during play** (within ~2 minutes),
+  instead of only at the next server restart. New admin switches `ObjectSpawn.AutoPurgeOrphans` (on by
+  default) and `OrphanPollSeconds`. Only Uriel's own objects are ever removed — never anything native.
+- **New (admin): adjustable object spacing.** The minimum distance Uriel keeps between spawned objects is
+  now a config setting — `ObjectSpawn.OverlapMinDistance` (default `0.5`m). Lower it to place décor closer
+  together / tighter around furniture, or set it to `0` to only block placing two things in the exact same
+  spot. (Placing flush against a wall already worked and is unchanged.)
+- **New (admin): `force` spawn for invisible effect zones.** Area-effect prefabs (garlic/holy/cursed
+  zones, dynamic clouds) are non-networked, so they were refused (they'd spawn invisible). Admins can now
+  place them for testing with `.uriel spawn <guid> force` — the reply warns they likely won't be visible
+  (you feel the effect, not see it). Players and the normal catalog are unaffected; other safety filters
+  (no characters, abilities, or crash-prone containers) still apply.
+- **Fix:** a flag typed right after the object name (e.g. `.uriel spawn <guid> force`) used to do nothing;
+  rotation and flags now work in any order after the name.
+- **Companion mod renamed:** BloodCraftHub is now **Raphael**
+  (https://thunderstore.io/c/v-rising/p/TheShadowRealm/Raphael/). Still optional, still not a dependency.
+
 ## 0.18.2 (2026-06-09)
 
 - **Fix: more invisible objects filtered out.** NPC idle-animation spot markers
@@ -23,7 +50,7 @@ Critical hotfixes from live testing of 0.18.0:
 - **Fix (important): `.uriel forcepurgeplot` no longer removes native objects.** In 0.18.0 it could
   delete a plot's natural resource nodes/trees. It now does exactly what `.uriel purgeplot` does — only
   Uriel's own objects, never anything native.
-- **Fix: object catalog / BloodCraftHub handshake no longer spams errors.** A bad internal type check
+- **Fix: object catalog / Raphael handshake no longer spams errors.** A bad internal type check
   broke the catalog and flooded the log on `.uriel api version`; resolved.
 
 ## 0.18.0 (2026-06-09)
@@ -69,7 +96,7 @@ Critical hotfixes from live testing of 0.18.0:
 - **Fix: characters & bosses no longer show up as spawnable objects.** Any `CHAR_`
   units / V Bloods that slipped into your unlock list from an older version are
   cleaned out automatically, and they can no longer be spawned.
-- **Fix (BloodCraftHub):** the object catalog and your unlocked-objects list now load
+- **Fix (Raphael companion):** the object catalog and your unlocked-objects list now load
   in the companion UI (they previously came back empty).
 
 ## 0.16.0 (2026-06-08)
@@ -109,7 +136,7 @@ Critical hotfixes from live testing of 0.18.0:
   *world* objects you can't otherwise get).
 - **In-game help got friendlier:** `.uriel help` now gives a clean, topic-by-topic
   menu (`objects` / `storage` / `stairs` / `admin`) instead of one long list.
-- Optional BloodCraftHub integration: a machine API exposes the object catalog and
+- Optional Raphael (companion) integration: a machine API exposes the object catalog and
   each player's collection for a future client-side palette UI.
 - Note: spawned world objects are managed with the `.uriel` commands above, not
   the vanilla build menu (an engine limitation).

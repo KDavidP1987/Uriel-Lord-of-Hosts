@@ -49,8 +49,9 @@ the map (GloomRot, Cursed Forest, dungeons, ruins). Spawn one at your aim point 
 or **at your own location** with the `here` flag (handy from a UI button) — inside
 your own plot; it's **indestructible and decay-proof by default**, and you
 move/rotate/remove it with `.uriel move` / `.uriel rotate` / `.uriel despawn`.
-Everything you place persists across restarts and is cleaned up automatically if
-its castle is ever destroyed.
+Everything you place persists across restarts and is **cleaned up automatically —
+during play, within a couple of minutes — if its castle is ever abandoned or
+destroyed** (and you can't keep building on a plot you've given up).
 
 **Choose how durable it is** with optional spawn flags: `breakable` (raids and
 decay can destroy it), `smashable` (you can destroy it by hand too), or
@@ -67,37 +68,41 @@ unlock when you hit 100% collection, **defeat Dracula** (finish the game), or pe
 boss via an admin-curated map. Admins choose the model (or turn it off), can set a
 build cost, block specific objects, and grant objects directly.
 
-> **How it's managed:** spawned world objects are placed and moved with the
-> `.uriel` commands above, not the vanilla build menu (an engine limitation —
-> the game won't let arbitrary world objects be selected in build mode). The
-> optional **BloodCraftHub** companion can present a point-and-click palette UI.
+**How it's managed:** spawned world objects are placed and moved with the `.uriel`
+commands above, not the vanilla build menu (an engine limitation — the game won't let
+arbitrary world objects be selected in build mode). The optional **Raphael** companion
+mod *(formerly BloodCraftHub)* can present a point-and-click palette UI.
 
-> **🧪 Pre-1.0 guidance & quick tips (Object Spawning):**
-> - **Not every spawnable object has been individually tested.** The game ships
->   thousands of prefabs; some may misbehave when placed as décor (spawn invisible,
->   or not function). This is a big reason Uriel is **pre-1.0**, and exactly why
->   **we're asking for feedback** — every broken object you report goes onto the
->   block list for the next release.
-> - **Hazardous/problematic prefabs are blocked from spawning.** The game's object
->   list contains many entries that aren't real placeable décor (world-gen
->   controllers, NPC-spawner "points of interest", invisible markers, baked
->   "source" copies). Known-bad ones are filtered out of the catalog so players
->   can't pick them. **This filter is still being refined** — there may be
->   problematic objects not yet found.
-> - **If something spawns but you can't see it, it's INVISIBLE, not absent.** The
->   object is almost certainly there on the server but not rendering correctly (it's
->   one of the not-yet-caught bad ones). **`.uriel despawn` it** to be safe — don't
->   leave it sitting there — and please report it so it can be blocked.
-> - **Don't overlap objects on purpose.** Stacking objects in the same spot can
->   cause problems; Uriel blocks overlapping placements by default
->   (`ObjectSpawn.PreventOverlap`). Offset things slightly instead.
-> - **Admins can block any object** they don't want available — even one that isn't
->   hard-coded blocked — with `.uriel block <guid>` (or by configuring their
->   server). Blocked prefabs vanish from the catalog and can't be spawned.
-> - **Prefer admin-only while you vet it:** the default `ObjectSpawn.AdminOnly=true`
->   keeps spawning to admins; open it to players once you're comfortable. You can
->   also disable this whole feature (`ObjectSpawn.Enabled=false`) and keep the rest
->   of Uriel.
+**Admins can put rules on player spawning.** Set a **per-object or global limit** on how
+many of an object fit on one plot, an **item cost** to build it, and whether players may
+make it **indestructible** or **auto-respawning** — `.uriel objcfg <object> max 3`,
+`.uriel objcfg <object> cost 100 <itemId>`, `.uriel objcfgglobal …` for the defaults,
+`.uriel objcfglist` to review. Admins themselves are never restricted.
+
+**🧪 Pre-1.0 guidance & quick tips (Object Spawning)**
+
+- **Not every spawnable object has been individually tested.** The game ships thousands
+  of prefabs; some may misbehave when placed as décor (spawn invisible, or not function).
+  This is a big reason Uriel is **pre-1.0**, and exactly why **we're asking for feedback** —
+  every broken object you report goes onto the block list for the next release.
+- **Hazardous/problematic prefabs are blocked from spawning.** The game's object list
+  contains many entries that aren't real placeable décor (world-gen controllers, NPC-spawner
+  "points of interest", invisible markers, baked "source" copies). Known-bad ones are filtered
+  out of the catalog so players can't pick them. **This filter is still being refined** — there
+  may be problematic objects not yet found.
+- **If something spawns but you can't see it, it's INVISIBLE, not absent.** The object is
+  almost certainly there on the server but not rendering correctly (it's one of the
+  not-yet-caught bad ones). **`.uriel despawn` it** to be safe — don't leave it sitting there —
+  and please report it so it can be blocked.
+- **Don't overlap objects on purpose.** Stacking objects in the same spot can cause problems;
+  Uriel blocks overlapping placements by default (`ObjectSpawn.PreventOverlap`). Offset things
+  slightly instead.
+- **Admins can block any object** they don't want available — even one that isn't hard-coded
+  blocked — with `.uriel block <guid>` (or by configuring their server). Blocked prefabs vanish
+  from the catalog and can't be spawned.
+- **Prefer admin-only while you vet it:** the default `ObjectSpawn.AdminOnly=true` keeps spawning
+  to admins; open it to players once you're comfortable. You can also disable this whole feature
+  (`ObjectSpawn.Enabled=false`) and keep the rest of Uriel.
 
 ### 🗄 Public Storage *(per-container opt-in)*
 
@@ -119,18 +124,17 @@ the taker — bring Dominating Presence to escort them). The game's own subdue
 button only ever appears for the cell's own clan (an engine limitation), so the
 command covers everyone else.
 
-> **Heads-up for players accessing a share:** when a chest or cell is first made
-> public, a player trying to use it may need to **log out and back in once**
-> before their client recognizes it as accessible. After that initial relog, it
-> behaves like any other container you can open.
+**Heads-up for players accessing a share:** when a chest or cell is first made public,
+a player trying to use it may need to **log out and back in once** before their client
+recognizes it as accessible. After that initial relog, it behaves like any other container
+you can open.
 
-> **🧪 Pre-1.0 guidance (Public Storage):** sharing is always **per-container,
-> owner opt-in** — nothing is shared unless someone shares it, so the blast radius
-> is small. Trial it on a few containers first. Chest sharing and prison-cell
-> sharing have **separate switches** (`PublicStorage.Enabled` /
-> `PublicStorage.PrisonEnabled`), so you can enable one and not the other. Found
-> an issue? Report it on Discord and, if needed, flip the switch off — your
-> containers simply go back to private.
+**🧪 Pre-1.0 guidance (Public Storage):** sharing is always **per-container, owner opt-in** —
+nothing is shared unless someone shares it, so the blast radius is small. Trial it on a few
+containers first. Chest sharing and prison-cell sharing have **separate switches**
+(`PublicStorage.Enabled` / `PublicStorage.PrisonEnabled`), so you can enable one and not the
+other. Found an issue? Report it on Discord and, if needed, flip the switch off — your
+containers simply go back to private.
 
 ### 🪜 Stair Editing
 
@@ -144,11 +148,11 @@ command covers everyone else.
   tearing apart the floors and walls it's attached to (something a normal
   dismantle can't cleanly do).
 
-> **🧪 Pre-1.0 guidance (Stair Editing):** restyling rebuilds the staircase on the
-> spot (destroy + respawn in the new style); position, rotation, and ownership are
-> preserved. As with any pre-1.0 feature, try it on a spare staircase first. If a
-> stray "ghost" stair is ever left behind, an admin can clean it with
-> `.uriel stairpurge`. You can disable the whole feature with `StairSwap.Enabled=false`.
+**🧪 Pre-1.0 guidance (Stair Editing):** restyling rebuilds the staircase on the spot
+(destroy + respawn in the new style); position, rotation, and ownership are preserved. As
+with any pre-1.0 feature, try it on a spare staircase first. If a stray "ghost" stair is ever
+left behind, an admin can clean it with `.uriel stairpurge`. You can disable the whole feature
+with `StairSwap.Enabled=false`.
 
 ## Installation
 
@@ -184,11 +188,11 @@ server**, not on player clients. Players need nothing installed.
 | [**VampireCommandFramework**](https://thunderstore.io/c/v-rising/p/deca/VampireCommandFramework/) | 0.10.x | Chat-command framework (hard dependency) |
 
 **Optional companion (not a dependency):** the client-side mod
-[**BloodCraftHub**](https://thunderstore.io/c/v-rising/p/TheShadowRealm/BloodCraftHub/)
-is designed to work alongside Uriel — players who install it on their own client
-can drive Uriel's features from in-game UI panels and buttons instead of typing.
+[**Raphael**](https://thunderstore.io/c/v-rising/p/TheShadowRealm/Raphael/) *(formerly
+BloodCraftHub)* is designed to work alongside Uriel — players who install it on their own
+client can drive Uriel's features from in-game UI panels and buttons instead of typing.
 It is **not required**: like any server-side mod, every Uriel feature works fully
-through the `.uriel` chat commands, with or without BloodCraftHub.
+through the `.uriel` chat commands, with or without Raphael.
 
 ## Commands
 
@@ -228,7 +232,9 @@ In **Discovery** mode you unlock objects by **destroying them in the world**; th
 | `.uriel forcepurgeplot` | Synonym for `purgeplot` (live spawns + records; native objects never touched). The old chain sweep was removed — it could delete native resources |
 | `.uriel purgeorphans` | **Server-wide cleanup** — scan the whole map and remove orphaned Uriel objects (castle gone, or no living heart governing them). Only Uriel's objects are touched; a backup for the automatic boot-time cleanup |
 | `.uriel bossmap add\|remove\|list <vblood> <obj>` | Curate which objects a V-blood defeat unlocks |
-| `.uriel api version\|catalog\|unlocked` | Machine API for BloodCraftHub |
+| `.uriel objcfg <name\|guid> <field> [v1] [v2]` | Per-object player limits: `max <n>` (per plot), `cost <amount> <itemGuid>`, `indestructible <true\|false>`, `respawn <true\|false>`, `clear`, `show` |
+| `.uriel objcfgglobal <field> [v1] [v2]` · `.uriel objcfglist` | Global default condition (per-object overrides it) · list all conditions |
+| `.uriel api version\|catalog\|unlocked` | Machine API for Raphael |
 </details>
 </details>
 
@@ -299,9 +305,12 @@ Config changes take effect on server restart.
 | ObjectSpawn | PrefabCostItem / PrefabCostStack | `0` / `0` | Item + amount a player pays to build one object (0 = free) |
 | ObjectSpawn | Indestructible | `true` | Spawned objects are immortal + decay-proof by default (per-spawn `breakable`/`smashable` flags override; turn off globally for PvP) |
 | ObjectSpawn | PreventOverlap | `true` | Refuse to spawn/move an object onto a wall, station, or another spawned object (only floors may sit under décor) — prevents destabilizing pile-ups. Set `false` to allow free stacking at your own risk |
+| ObjectSpawn | OverlapMinDistance | `0.5` | Minimum spacing (m) between objects when PreventOverlap is on. Lower it to place décor closer together; `0` = only block the exact same tile. Doesn't affect placing flush against walls |
 | ObjectSpawn | RespawnEnabled | `true` | Master switch for the `respawn` flag (auto-return destroyed objects until the castle is gone) |
 | ObjectSpawn | RespawnPollSeconds | `30` | How often (seconds, min 5) the respawn check runs |
-| ObjectSpawn | *(more)* | — | CollectionEnabled, BossUnlocksEnabled, DiscoveryNotify, RefundOnRemove, PurgeOrphansOnBoot — see the generated `.cfg` |
+| ObjectSpawn | AutoPurgeOrphans | `true` | Clean up objects on an abandoned/destroyed castle **during play** (within ~2 min), not just at the next restart. Only Uriel's own objects are touched |
+| ObjectSpawn | OrphanPollSeconds | `120` | How often (seconds, min 30) the mid-session orphan sweep runs |
+| ObjectSpawn | *(more)* | — | CollectionEnabled, BossUnlocksEnabled, DiscoveryNotify, RefundOnRemove, PurgeOrphansOnBoot — see the generated `.cfg`. Per-object/global player limits live in `object_conditions.json` (`.uriel objcfg`) |
 | PublicStorage | Enabled | `true` | Master switch for chest sharing |
 | PublicStorage | PrisonEnabled | `true` | Independently allow prison-cell sharing |
 | PublicStorage | MaxTargetDistance | `5` | Aim distance for `.uriel share` / `unshare` targeting |
@@ -323,8 +332,8 @@ toggleable server-side sub-mods. **Tentative and subject to change**; full list
   windows (select hours).
 - **Bulk storage sharing** — open *all* heart-linked storage at a location in one
   action, auto-excluding the pay chest and any chests you've marked private.
-- **BloodCraftHub integration** — a client-side companion UI (share panels,
-  prisoner-take button, stair-style picker).
+- **Raphael integration** *(formerly BloodCraftHub)* — a client-side companion UI
+  (share panels, prisoner-take button, stair-style picker).
 
 **Bigger ideas being explored:** plot expansion (separate-instance phase gates or
 map copy/paste), a PvP-arena V Blood boss mode with prize tables, paid area-gating

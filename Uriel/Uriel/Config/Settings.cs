@@ -21,7 +21,10 @@ internal static class Settings
     public static ConfigEntry<float> ObjectSpawn_MaxTargetDistance { get; private set; }
     public static ConfigEntry<bool> ObjectSpawn_Indestructible { get; private set; }
     public static ConfigEntry<bool> ObjectSpawn_PreventOverlap { get; private set; }
+    public static ConfigEntry<float> ObjectSpawn_OverlapMinDistance { get; private set; }
     public static ConfigEntry<bool> ObjectSpawn_PurgeOrphansOnBoot { get; private set; }
+    public static ConfigEntry<bool> ObjectSpawn_AutoPurgeOrphans { get; private set; }
+    public static ConfigEntry<int> ObjectSpawn_OrphanPollSeconds { get; private set; }
     public static ConfigEntry<bool> ObjectSpawn_RespawnEnabled { get; private set; }
     public static ConfigEntry<int> ObjectSpawn_RespawnPollSeconds { get; private set; }
     public static ConfigEntry<bool> ObjectSpawn_IncludeCastleBuildables { get; private set; }
@@ -115,12 +118,36 @@ internal static class Settings
             "the floor above/below don't count), so multi-storey castles are unaffected. Set FALSE to allow " +
             "free stacking/overlap (e.g. a candle directly on a table) at your own risk.");
 
+        ObjectSpawn_OverlapMinDistance = config.Bind(
+            "ObjectSpawn", "OverlapMinDistance", 0.5f,
+            "When PreventOverlap is on, the minimum spacing (meters, center-to-center) Uriel keeps between a " +
+            "spawned/moved object and a nearby NON-wall object — the proximity backstop that stops two pieces " +
+            "from near-stacking when their tile cells differ by a fraction. Default 0.5 (~one tile). LOWER it " +
+            "(toward 0) to let admins/players place décor closer together / tighter around furniture; 0 disables " +
+            "this distance check entirely (only the exact same-tile-cell block remains). Raise it to space objects " +
+            "out more. NOTE: walls are already exempt, so this does NOT affect how close you can place to a wall — " +
+            "that's governed only by the same-cell test. Clamped to a 0 minimum.");
+
         ObjectSpawn_PurgeOrphansOnBoot = config.Bind(
             "ObjectSpawn", "PurgeOrphansOnBoot", true,
             "On server start, automatically remove any Uriel-spawned object whose castle is gone " +
             "(the castle heart no longer exists — destroyed or fully decayed). This keeps a destroyed " +
             "castle from leaving permanent, indestructible orphan objects floating in the world. Turn " +
             "OFF to keep such objects until an admin removes them manually ('.uriel purgeplot').");
+
+        ObjectSpawn_AutoPurgeOrphans = config.Bind(
+            "ObjectSpawn", "AutoPurgeOrphans", true,
+            "Periodically scan the map mid-session and remove Uriel-spawned objects whose castle is gone " +
+            "(the heart no longer exists — castle abandoned/destroyed/decayed), instead of waiting for the " +
+            "next server boot (PurgeOrphansOnBoot). Registry-driven, so ONLY Uriel's own objects are ever " +
+            "touched — native world objects are never affected. Turn OFF to clean orphans only at boot or " +
+            "via the manual '.uriel purgeorphans'.");
+
+        ObjectSpawn_OrphanPollSeconds = config.Bind(
+            "ObjectSpawn", "OrphanPollSeconds", 120,
+            "How often (seconds, approximate) the mid-session orphan sweep runs when AutoPurgeOrphans is on. " +
+            "The sweep is a whole-map scan, so keep it relatively infrequent; 120s is a good balance. " +
+            "Clamped to a 30s minimum.");
 
         ObjectSpawn_RespawnEnabled = config.Bind(
             "ObjectSpawn", "RespawnEnabled", true,

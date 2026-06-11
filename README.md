@@ -30,11 +30,11 @@ Every feature ships behind its own config switch — Uriel is never all-or-nothi
 
 | Feature | Status | Design doc |
 |---|---|---|
-| **Object spawning** — collect & place **world objects** the build menu never offers (resource nodes, world chests, breakable props, dungeon/GloomRot/Cursed decor) inside your castle plot; runtime catalog classifier (units/abilities/internals/castle-buildables filtered out), territory-gated placement, JSON persistence + orphan cleanup, a collect-by-destruction unlock model (Discovery/Full access, build cost, boss/completion unlocks for non-destructibles), admin block/grant tools, and a `[URIEL:*]` API for BloodCraftHub | Implemented; placement/catalog/discovery validated live; boss-kill unlock triggers + BCH API consumption pending validation | [docs/features/OBJECT_SPAWNING.md](docs/features/OBJECT_SPAWNING.md) |
+| **Object spawning** — collect & place **world objects** the build menu never offers (resource nodes, world chests, breakable props, dungeon/GloomRot/Cursed decor) inside your castle plot; runtime catalog classifier (units/abilities/internals/castle-buildables filtered out), territory-gated placement that rejects abandoned/decayed plots, JSON persistence + boot-time and **mid-session orphan cleanup**, a collect-by-destruction unlock model (Discovery/Full access, boss/completion unlocks for non-destructibles), **admin-managed global + per-object spawn conditions** (max-per-plot, item cost, permit-indestructible/respawn), admin block/grant tools, and a `[URIEL:*]` API for Raphael | Implemented; placement/catalog/discovery validated live; abandon-cleanup + spawn-conditions + boss-kill unlock triggers + Raphael API consumption pending validation | [docs/features/OBJECT_SPAWNING.md](docs/features/OBJECT_SPAWNING.md) |
 | **Public storage** — per-container opt-in: mark a specific chest publicly accessible, with optional permissions (take/give), per-player withdrawal limits, per-stack access costs paid to the owner, and `nearest` targeting for UI relays | Implemented; open+take validated live; rebuild-on-share mechanism + policies pending broader validation | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
 | **Public prison cells** — separately mark a prison cell publicly accessible: feed/extract via the native UI, prisoner takeover via `.uriel takeprisoner` (the native subdue button is client-gated to the cell's clan — confirmed unreachable server-side) | Implemented; feed/extract validated live; takeprisoner pending broader validation | [docs/features/PUBLIC_STORAGE.md](docs/features/PUBLIC_STORAGE.md) |
 | **Stair editing** — restyle placed stairs **live** (destroy+respawn; same-shape cosmetics only, per-user DLC gating), plus `.uriel removestairs` to cleanly delete a staircase without disturbing connected floors/walls | Implemented; live restyle validated locally on straight/curved/wide shapes; broader testing pending | [docs/features/STAIR_HOTSWAP.md](docs/features/STAIR_HOTSWAP.md) |
-| **BloodCraftHub integration** *(optional companion — not a dependency)* — client-side UI that can drive Uriel's features (share panels, prisoner-take button, stair picker); every feature also works via chat commands | Contract authored; BCH-side work pending | [Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md](Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md) |
+| **Raphael integration** *(optional companion — not a dependency; formerly BloodCraftHub)* — client-side UI that can drive Uriel's features (share panels, prisoner-take button, stair picker); every feature also works via chat commands | Contract authored; companion-side work pending | [Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md](Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md) |
 
 > **Note for players accessing a share:** when a chest or cell is first made
 > public, a player trying to use it may need to **log out and back in once**
@@ -79,7 +79,8 @@ In **Discovery** mode you unlock objects by **destroying them in the world** (co
 | `.uriel forcepurgeplot` | Synonym for `purgeplot` (live spawns + records; native objects never touched). The old chain sweep was removed — it could delete native resources |
 | `.uriel purgeorphans` | Server-wide cleanup: scan the whole map and remove orphaned Uriel objects (castle gone / no living heart governing them). Backup for the boot-time orphan purge |
 | `.uriel bossmap add\|remove\|list <vblood> <obj>` | Curate which objects a V-blood defeat unlocks |
-| `.uriel api version\|catalog\|unlocked` | `[URIEL:*]` machine API for BloodCraftHub |
+| `.uriel objcfg\|objcfgglobal <field> …` · `.uriel objcfglist` | Set/list global + per-object spawn conditions for players: `max <n>` per plot, `cost <amount> <itemGuid>`, `indestructible <true\|false>`, `respawn <true\|false>` (admins themselves are unrestricted) |
+| `.uriel api version\|catalog\|unlocked` | `[URIEL:*]` machine API for Raphael |
 </details>
 </details>
 
@@ -183,10 +184,10 @@ in **[`docs/ROADMAP.md`](docs/ROADMAP.md)**. Highlights:
   auto-excluding the pay chest and any chests marked private.
 
 **Platform / integration:**
-- **BloodCraftHub integration** — client-side companion UI (share panels,
-  prisoner-take button, stair-style picker) against Uriel's command surface.
+- **Raphael integration** *(formerly BloodCraftHub)* — client-side companion UI
+  (share panels, prisoner-take button, stair-style picker) against Uriel's command surface.
 - **Machine-readable `[URIEL:*]` API** — structured replies for companion UIs
-  (see the [BCH handoff](Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md) §6).
+  (see the [integration handoff](Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md) §6).
 - **Stair editing polish** — broader testing of attachment/decay/pathing edge
   cases on the live-rebuild path.
 
@@ -219,7 +220,7 @@ becomes — feedback is hugely valued.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — shipped / planned / exploratory feature roadmap
 - [`docs/PREFLIGHT.md`](docs/PREFLIGHT.md) — session-start checklist
 - [`docs/DEV_REMINDERS.md`](docs/DEV_REMINDERS.md) — IL2CPP/ECS gotchas & process rules
-- [`Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md`](Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md) — the BloodCraftHub living contract
+- [`Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md`](Uriel/Uriel/docs/BCH_INTEGRATION_HANDOFF.md) — the Raphael (companion-mod) living contract
 - [`CHANGELOG.md`](CHANGELOG.md) — full changelog (the Thunderstore package
   carries a condensed player-facing changelog)
 

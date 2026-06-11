@@ -8,6 +8,85 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.19.0] - 2026-06-10
+
+Object Spawning: abandoned/destroyed-plot cleanup + admin-managed spawn conditions.
+Also: the client-side companion mod **BloodCraftHub is now published as Raphael**
+(<https://thunderstore.io/c/v-rising/p/TheShadowRealm/Raphael/>) — public references updated.
+
+### Fixed — can no longer build on, and objects are cleaned off, an abandoned/destroyed plot
+
+- **Placement gate rejects an abandoned / fully-decayed / unclaimed plot** (applies to everyone,
+  admins included — there is no live owner to adopt the object into). New `CastleClaimedAndAlive`
+  in `CheckPlacement`, using KindredCommands' own definitions (field names verified against the
+  reference assemblies): *decayed* = `CastleHeart.FuelEndTime - ServerGameManager.ServerTime <= 0
+  && FuelQuantity <= 0` (admin-protected hearts use `FuelEndTime = +∞` and always pass); *unclaimed*
+  = the heart's `UserOwner.Owner.GetEntityOnServer()` no longer resolves. A heart whose entity was
+  destroyed outright is already handled — its territory resolves no heart, so `TryResolvePlot` fails.
+- **Mid-session orphan sweep** — objects on a castle that is abandoned/destroyed/decayed during a
+  session are now removed within ~2 minutes, instead of waiting for the next boot's
+  `PurgeOrphansOnBoot`. `PurgeOrphans` was refactored to a shared `PurgeOrphansCore`; the new
+  `StartOrphanSweepLoop`/`OrphanSweepTick` polls it via `Tick.RunRepeating`. Same registry-driven
+  engine as `.uriel purgeorphans` (only Uriel's own objects can ever be removed; native objects are
+  never touched) with the same zero-living-plots safety abort. Quiet unless it removes something.
+  New config: `ObjectSpawn.AutoPurgeOrphans` (default `true`) + `ObjectSpawn.OrphanPollSeconds`
+  (default `120`, min `30`).
+
+### Added — admin-managed spawn conditions (global + per-object)
+
+- New `Services/ObjectConditionsService.cs` + `object_conditions.json` (under `BepInEx/config/Uriel/`).
+  Two layers: a **global default** applied to every object, and **per-object overrides** keyed by
+  prefab GUID that fully replace the global value for the field they set (resolution per field:
+  per-object → global → built-in fallback). Enforced for **non-admin players only** — admins always
+  spawn freely (same model as `AdminOnly`/cost). Fully backward-compatible: with nothing configured,
+  behavior is unchanged (cost still falls back to `ObjectSpawn.PrefabCostItem/Stack`).
+- Fields: **MaxPerPlot** (max of this object per castle plot, counts Uriel records on the territory;
+  0 = unlimited), **Cost** item+amount (overrides the server-wide cost config when set; 0 = free),
+  **PermitIndestructible** (false ⇒ a default-indestructible spawn is downgraded to breakable; an
+  explicit indestructible request is refused), **PermitRespawn** (false ⇒ a `respawn` request is
+  refused). Enforced inside `ObjectSpawnService.Spawn`'s non-admin gate block.
+- Commands (admin-only): `.uriel objcfg <name|guid> <field> [v1] [v2]`,
+  `.uriel objcfgglobal <field> [v1] [v2]`, `.uriel objcfglist`. Fields:
+  `max <n>` | `cost <amount> <itemGuid>` | `indestructible <true|false>` | `respawn <true|false>` |
+  `clear` | `show`. Persisted synchronously on every change (like the blocklist/bossmap).
+
+### Added — configurable overlap spacing (`ObjectSpawn.OverlapMinDistance`)
+
+- The overlap guard's center-to-center proximity floor (the backstop that stops two pieces near-stacking
+  when their tile cells differ by a fraction) was a hardcoded `0.5m`; it's now the admin config
+  **`ObjectSpawn.OverlapMinDistance`** (default `0.5`). Lower it (toward 0) to place décor closer together
+  / tighter around furniture; **0 disables the distance check** (only the exact same-tile-cell block
+  remains). Walls are still exempt from this check, so it does not affect flush-to-wall placement.
+
+### Fixed — `.uriel spawn` flags right after the name
+
+- `.uriel spawn <guid> force` (and any flag typed immediately after the name) silently did nothing — the
+  flag landed in the integer `rotation` parameter slot and failed to bind. Rotation (0–3) and flags are
+  now parsed order-independently from all trailing tokens: the first integer is the rotation, everything
+  else is a flag. `.uriel spawn <guid> force`, `.uriel spawn <guid> 0 force`, and `.uriel spawn <guid>
+  force here` all work.
+
+### Added — admin `force` spawn for non-networked effect zones
+
+- Gameplay-effect **zone** prefabs (garlic/holy/corruption/cursed/stealth areas, dynamic clouds —
+  e.g. `TM_Garlic_Zone_Area01` 2136523022) are `StaticTileModel`s with **no `NetworkId`**, so the
+  invisible-spawn gate (v0.18.0) refused them. They're now spawnable by an **admin** with the new
+  `force` flag (`.uriel spawn <guid> force`, alias `allowinvisible`) — the reply warns they likely
+  render **invisible** (you feel the effect, you don't see a mesh). `IsPlaceableObject` was split into
+  `HasTileComponent` + `NetworkId`; new `IsTileModelObject` runs every other safety filter (characters /
+  V Bloods / abilities / chain controllers / `DropInInventoryOnSpawn` crash-hazard containers / debug /
+  BlueprintData) **without** the NetworkId requirement, so `force` only relaxes the rendering check —
+  never the hazard filters. The strict gate still governs the catalog and the normal player path, so
+  players never receive an invisible object. `ReapplySpawned` now keeps records for such force-spawned
+  objects across restarts (drops only genuine non-objects/hazards).
+
+### Changed — BloodCraftHub → Raphael
+
+- The optional client-side companion mod is now **Raphael**
+  (<https://thunderstore.io/c/v-rising/p/TheShadowRealm/Raphael/>). Public-facing references (READMEs,
+  command/help text, the `.uriel api` descriptions) updated. The internal integration handoff keeps the
+  "BCH" shorthand (the companion-side workspace uses it), with a rename note added.
+
 ## [0.18.2] - 2026-06-09
 
 ### Fixed — more invisible markers filtered out

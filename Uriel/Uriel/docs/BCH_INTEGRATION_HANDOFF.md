@@ -1,7 +1,12 @@
-# Uriel → BloodCraftHub (BCH) Integration Handoff
+# Uriel → Raphael (BCH) Integration Handoff
 
-> **Purpose.** The single reference for everything **BloodCraftHub (the
-> client-side companion mod)** needs to build to surface and extend **Uriel,
+> **Naming.** The client-side companion mod is now published on Thunderstore as
+> **Raphael** (<https://thunderstore.io/c/v-rising/p/TheShadowRealm/Raphael/>),
+> formerly **BloodCraftHub**. This document keeps the short internal handle **"BCH"**
+> (the companion-side workspace still uses it); read "BCH" as "Raphael" throughout.
+>
+> **Purpose.** The single reference for everything **Raphael (the
+> client-side companion mod, "BCH")** needs to build to surface and extend **Uriel,
 > Lord of Hosts**. Authored and maintained in the **Uriel** workspace
 > (server-side mod); carry it to the BCH workspace when you switch projects
 > and keep building from it there.
@@ -28,6 +33,28 @@ the total in-game prefab catalog and each player's unlocked-prefab collection (t
 "Uriel list" BCH wants), analogous to Beelzebub's ability-catalog API. Shares/stairs
 endpoints remain 📋 planned. Object Spawning itself (Phase 1–2) is built but not yet
 released.**
+
+**ℹ️ v0.19.0 (2026-06-11) — what changed for Raphael. No `[URIEL:*]` wire shape changed; ApiVersion stays 1.**
+
+- **`.uriel spawn` is now argument-order-tolerant.** After the object name, the rotation (0–3) and any
+  flags may appear in ANY order — the first integer token is the rotation, the rest are flags. Raphael's
+  existing call (`.uriel spawn <guid> 0 here`) still works unchanged; flags no longer have to follow a
+  rotation slot. (Previously a flag typed immediately after the name landed in the int rotation parameter
+  and the command silently no-op'd — fixed.)
+- **New admin-only spawn flag `force`** (alias `allowinvisible`) places a genuine-but-non-networked tile
+  model (e.g. an effect ZONE) that would otherwise be refused — it likely renders INVISIBLE. **Admin-only
+  and for testing — Raphael should NOT surface `force` in a player-facing build palette.**
+- **Admin-managed spawn conditions** for NON-admin players (`.uriel objcfg` / `.uriel objcfgglobal` →
+  `object_conditions.json`): **max-per-plot**, **per-object item cost** (overrides the global
+  `ObjectSpawn.PrefabCostItem/Stack`), and **permit-indestructible / permit-respawn**. Enforced inside
+  `.uriel spawn`; a refused spawn returns human-readable chat text (e.g. *"You can have at most 3x … on
+  this plot"*, *"… can't be spawned indestructible on this server"*). The `[URIEL:object]` row still
+  carries `guid/disc/label/cat` ONLY — per-object cost/limits are **not** on the wire yet. 📋 If Raphael
+  wants to show a build's cost or a per-plot cap client-side, add fields to the catalog row in a future
+  ApiVersion bump (called out here so it isn't missed).
+- **Server-internal (no Raphael impact):** abandoned/decayed-plot placement gate, mid-session orphan
+  sweep (`ObjectSpawn.AutoPurgeOrphans`), and configurable overlap spacing
+  (`ObjectSpawn.OverlapMinDistance`). These don't change any command/reply Raphael consumes.
 
 **🐞 FIXED 2026-06-08 — `api catalog`/`api unlocked` returned nothing (BCH P0).**
 The two paged commands built their whole page (header + rows + `[URIEL:end]`) as a

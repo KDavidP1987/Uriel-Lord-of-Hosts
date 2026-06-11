@@ -874,6 +874,108 @@ reliable route.
 - The two compose: a server can enable either/both as independent sources of non-destructible unlocks.
   `.uriel grant` remains the manual override.
 
+### Abandoned/destroyed-plot cleanup + placement gate (2026-06-10) — ✅ BUILT, ⏳ live-validation pending
+
+**Why (owner live-test feedback):** a player who **abandoned** a plot could still `.uriel spawn` objects on
+it, and objects already on a plot were **not removed** when the castle was abandoned/destroyed (orphans
+lingered until the next boot). Two fixes:
+
+1. **Placement gate now rejects an abandoned/decaying/unclaimed plot** (`CastleClaimedAndAlive`, applied in
+   `CheckPlacement` for EVERYONE incl. admins — there's no live owner to adopt the object into). Two signals,
+   matching KindredCommands' own definitions (verified field names in the reference assemblies):
+   - **Decayed:** `CastleHeart.FuelEndTime - ServerGameManager.ServerTime <= 0 && CastleHeart.FuelQuantity <= 0`
+     (admin-protected hearts use `FuelEndTime = +∞` and always pass; a fueled castle passes).
+   - **Unclaimed:** the heart's `UserOwner.Owner.GetEntityOnServer()` no longer resolves (relinquished).
+   - A heart whose entity was destroyed outright never reaches the check — its territory resolves no heart,
+     so `TryResolvePlot` already fails (placement refused with the normal "stand inside a castle plot").
+2. **Mid-session orphan sweep** (`StartOrphanSweepLoop` / `OrphanSweepTick`, polled via `Tick.RunRepeating`,
+   config `ObjectSpawn.AutoPurgeOrphans` default ON + `ObjectSpawn.OrphanPollSeconds` default 120, min 30).
+   It runs the SAME registry-driven engine as `.uriel purgeorphans` (refactored into `PurgeOrphansCore`), so
+   only Uriel's own objects can ever be removed (native objects never touched) and the zero-living-plots
+   safety abort still applies. Quiet unless it removes something. This means a castle abandoned/destroyed
+   *during* a session gets its Uriel objects cleaned within ~2 min, instead of waiting for `PurgeOrphansOnBoot`.
+
+**⏳ Live tests:** (1) abandon/relinquish a plot, then `.uriel spawn` on it → refused ("abandoned or is
+decaying"); (2) spawn objects in a castle, then destroy/abandon the castle heart → within ~2 min the objects
+are gone (log: `mid-session orphan sweep removed N object(s)…`); objects in intact castles elsewhere survive.
+
+### Admin spawn conditions — global + per-object (2026-06-10) — ✅ BUILT, ⏳ live-validation pending
+
+**What:** admins can constrain how NON-admin players spawn objects (admins always bypass — same model as
+`AdminOnly`/cost). New `ObjectConditionsService` + `object_conditions.json` (under `BepInEx/config/Uriel/`),
+edited live with chat commands. Two layers: a **global default** applied to every object, and **per-object
+overrides** keyed by prefab GUID that fully replace the global value for the field they set. Resolution per
+field: per-object → global → built-in fallback.
+
+**Fields (per object or global):**
+- `max <n>` — **MaxPerPlot**: at most N of THIS object per castle plot (counts Uriel records on the
+  territory; 0 = unlimited).
+- `cost <amount> <itemGuid>` — item + count a player pays to spawn it; **overrides** the server-wide
+  `ObjectSpawn.PrefabCostItem/Stack` config when set (amount 0 = free).
+- `indestructible <true|false>` — **PermitIndestructible**: may a player spawn it indestructible? `false` ⇒
+  a default-indestructible spawn is quietly downgraded to breakable; an explicit `breakable`-less request for
+  indestructible is refused.
+- `respawn <true|false>` — **PermitRespawn**: may a player use the `respawn` flag? `false` ⇒ refused.
+- `clear` / `show` — reset a layer / print it.
+
+**Commands (admin-only):**
+| Command | Does |
+|---|---|
+| `.uriel objcfg <name\|guid> <field> [v1] [v2]` | Set/clear/show a per-object condition. |
+| `.uriel objcfgglobal <field> [v1] [v2]` | Set/clear/show the global default condition. |
+| `.uriel objcfglist` | List the global + all per-object conditions. |
+
+**Enforcement** is inside `ObjectSpawnService.Spawn`, in the existing non-admin gate block (after Discovery
+access): MaxPerPlot count → cost (condition overrides config) → permission flags applied to the
+indestructible/respawn decision. Fully **backward-compatible**: with no conditions set, behavior is
+unchanged (cost falls back to the existing config; everything allowed; unlimited). Persisted on every
+change (synchronous, like the blocklist/bossmap). **⏳ Live tests** (set `ObjectSpawn.AdminOnly=false` + a
+non-admin alt): (1) `.uriel objcfg <obj> max 2` → 3rd spawn on a plot refused; (2) `.uriel objcfg <obj> cost
+50 <itemGuid>` → spawn consumes 50, too few refused, and it overrides the global cost; (3) `.uriel objcfg
+<obj> indestructible false` → player's default spawn comes in breakable; (4) `.uriel objcfgglobal max 5`
+applies to objects with no per-object max; (5) admins remain unrestricted by all of the above.
+
+### Non-networked effect zones + admin `force` spawn (2026-06-11) — ✅ BUILT, ⏳ live-validation pending
+
+**Why (owner request):** the AoE "zone" prefabs surfaced for testing — `TM_Garlic_Zone_Area01`
+(2136523022), `TM_Holy_Zone_Area_T01/T02` (1365651921 / 1706728579), `TM_Corruption_Zone_Area01`
+(-1435765545), `TM_Cursed_Zone_Area01` (-923189082), `TM_Stealth_Zone_Area01_Prog_Test` (-1275256745),
+`TM_DenseDynamicClouds_Zone_Area01` (-1811178896) — were **refused by `.uriel spawn`**.
+
+**Root cause (prefab-dump audit):** these are `StaticTileModel` / `Unity.Transforms.Static` world-gen
+tile models that carry `TilePosition` but **no `ProjectM.Network.NetworkId`**. The `IsPlaceableObject`
+gate (NetworkId required since v0.18.0, the invisible-spawn fix) therefore blocks them — correctly, since
+a non-networked tile model spawns **invisible**. But these are gameplay-effect *zones* (the effect is in
+`RadialZone_Environment_Data` + `GarlicArea`/`HolyArea`/… scripts, or `DynamicCloudVolume`), so invisible
+is acceptable for testing — you feel the debuff, you just don't see a mesh. (My earlier note that they
+carry `NetworkId` was wrong — verified against the dump: none do.)
+
+**Fix — admin `force` opt-in:** `IsPlaceableObject` was split into `HasTileComponent` (tile shape) +
+`NetworkId`. New `IsTileModelObject(guid)` = the full real-object filter (debug / chain / `IsNonObject`
+hazard families incl. `DropInInventoryOnSpawn` / characters / V Bloods / BlueprintData) **minus** the
+NetworkId requirement. `.uriel spawn` now distinguishes:
+- **non-object** (character/ability/internal) → refused as before (+ stale-unlock scrub);
+- **genuine tile model but non-networked** → refused for players/catalog with an explanatory message; an
+  **admin** can retry with the `force` flag (`.uriel spawn <guid> force`, alias `allowinvisible`) to place
+  it anyway. Success reply warns it likely renders invisible. All other safety filters still apply, so
+  `force` can't spawn a character, chain controller, or the crash-hazard `_Full` containers.
+`ReapplySpawned` now drops boot records via `IsTileModelObject` (not `IsRealPlaceableObject`), so a
+force-spawned non-networked object KEEPS its record and stays manageable across restarts (only true
+non-objects/hazards are forgotten). **⏳ Live test:** `.uriel spawn 2136523022 force` inside a plot →
+placed (invisible); stand in it → garlic debuff applies? `.uriel despawn` removes it. Whether the zone
+scripts actually tick on a grafted static entity is the open question this unblocks.
+
+**Two follow-ups (2026-06-11):**
+- **`.uriel spawn` flag-after-name parse fix.** `.uriel spawn <guid> force` silently did nothing — the
+  `force` token bound to the integer `rotation` parameter and failed. The command now takes all trailing
+  tokens as strings and parses them order-independently (first integer = rotation, rest = flags), so a flag
+  may follow the name directly.
+- **Overlap spacing is now configurable.** The hardcoded `OverlapMinDistance = 0.5f` proximity backstop
+  became config `ObjectSpawn.OverlapMinDistance` (default 0.5m). `WouldOverlap` reads
+  `math.max(0f, Settings…Value)` and skips the distance test when it's 0 (only the exact-cell block
+  remains). Walls remain exempt (the `!Has<CastleWall>()` guard is unchanged), so flush-to-wall placement
+  is unaffected — the knob controls spacing to other non-wall objects.
+
 ## References
 - KindredCommands (odjit, AGPL-3.0) — `Helper.ConvertPosToTileGrid`,
   `Services/CastleTerritoryService.cs` (position → heart). Technique only.

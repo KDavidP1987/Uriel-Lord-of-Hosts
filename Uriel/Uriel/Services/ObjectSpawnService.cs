@@ -359,11 +359,14 @@ internal sealed class ObjectSpawnService
         bool changed = false;
         foreach (var r in new List<SpawnRecord>(_records))
         {
-            // A prefab that a newer build has BLOCKED (e.g. the crash-hazard "_Full" containers) must not be
-            // re-applied or re-resolved — forget its record. We deliberately do NOT touch any live entity
-            // here (don't risk re-triggering the hazard); the game manages whatever exists, and the player
-            // can remove it normally. This self-heals records left over from before the block landed.
-            if (!IsRealPlaceableObject(r.PrefabGuid))
+            // A prefab that a newer build has BLOCKED as a genuine NON-OBJECT or crash-hazard (e.g. the
+            // "_Full" containers, characters, abilities) must not be re-applied or re-resolved — forget its
+            // record. We deliberately do NOT touch any live entity here (don't risk re-triggering the hazard);
+            // the game manages whatever exists, and the player can remove it normally. This self-heals records
+            // left over from before the block landed. NOTE: uses IsTileModelObject (NOT IsRealPlaceableObject)
+            // so a merely NON-NETWORKED object an admin 'force'-spawned (an invisible effect zone) KEEPS its
+            // record and stays manageable across restarts — only true non-objects/hazards are dropped.
+            if (!IsTileModelObject(r.PrefabGuid))
             {
                 _records.Remove(r);
                 hazardDropped++;
@@ -586,6 +589,31 @@ internal sealed class ObjectSpawnService
         return charTeam.Value == heartTeam.Value;
     }
 
+    /// <summary>
+    /// Is this castle heart a LIVE, CLAIMED castle (vs. abandoned / fully-decayed / unclaimed)?
+    /// Used by the placement gate so a player can't keep placing objects on a plot they abandoned —
+    /// and so nobody places into a derelict plot at all (there's no owner to adopt the object into).
+    /// Two signals, mirroring KindredCommands' own definitions:
+    ///   - DECAYED: the heart is out of fuel AND its protection time has passed
+    ///     (<c>FuelEndTime - ServerTime &lt;= 0 &amp;&amp; FuelQuantity &lt;= 0</c>). Admin-protected hearts use
+    ///     <c>FuelEndTime = +∞</c>, so they always pass; a normally-fueled castle passes too.
+    ///   - UNCLAIMED: the heart has a <c>UserOwner</c> whose owner User no longer resolves on the server
+    ///     (relinquished). A heart whose entity was destroyed outright never reaches here — its territory
+    ///     resolves no heart, so <see cref="TryResolvePlot"/> already fails.
+    /// </summary>
+    static bool CastleClaimedAndAlive(Entity heart)
+    {
+        if (!heart.Exists()) return false;
+        if (heart.TryGetComponent<CastleHeart>(out var ch))
+        {
+            double remaining = ch.FuelEndTime - Core.ServerGameManager.ServerTime;
+            if (remaining <= 0 && ch.FuelQuantity <= 0) return false; // fully decayed → treat as abandoned
+        }
+        if (heart.TryGetComponent<UserOwner>(out var uo) && !uo.Owner.GetEntityOnServer().Exists())
+            return false; // relinquished / no owner
+        return true;
+    }
+
     /// <summary>Is a castle heart present at this tile? (disabled-included — a true absence
     /// means the castle is gone, not merely streamed out.)</summary>
     static bool HeartExistsByTile(int x, int y)
@@ -615,6 +643,13 @@ internal sealed class ObjectSpawnService
         if (!TryResolvePlot(pos, out heart, out territory))
         {
             error = $"Objects can only be {verb} inside a castle plot — stand/aim inside a castle.";
+            return false;
+        }
+        // Abandoned / fully-decayed / unclaimed plot — refuse for EVERYONE (incl. admins): there's no live
+        // owner to adopt the object into, and a player must not keep building on a plot they relinquished.
+        if (!CastleClaimedAndAlive(heart))
+        {
+            error = $"That castle plot has been abandoned or is decaying — objects can't be {verb} there.";
             return false;
         }
         if (!isAdmin && !OwnsHeart(character, heart))
@@ -785,6 +820,21 @@ internal sealed class ObjectSpawnService
     /// an unlock list and (b) prune such stale unlocks.</summary>
     bool IsRealPlaceableObject(int guid)
     {
+        if (!IsTileModelObject(guid)) return false;
+        // ...AND it must be NETWORKED so it renders client-side (catalog / player path; see IsPlaceableObject).
+        var guidMap = Core.PrefabCollectionSystem._PrefabLookupMap.GuidToEntityMap;
+        return guidMap.TryGetValue(new PrefabGUID(guid), out Entity prefab) && prefab.Has<NetworkId>();
+    }
+
+    /// <summary>Same structural test as <see cref="IsRealPlaceableObject"/> but WITHOUT the NetworkId
+    /// (rendering) requirement: "is this a genuine tile-model object — not a character / V Blood / ability /
+    /// chain controller / debug / internal / crash-hazard — even if it's a non-networked static model that
+    /// would spawn INVISIBLE?" An object that passes this but fails IsRealPlaceableObject is a real object
+    /// that simply won't render (e.g. a gameplay-effect ZONE: garlic/holy/cursed area, dynamic cloud). The
+    /// admin '<c>force</c>' spawn path uses this so such objects can still be placed for testing — the strict
+    /// IsRealPlaceableObject still governs the catalog and the normal player path, so players never get one.</summary>
+    bool IsTileModelObject(int guid)
+    {
         var pg = new PrefabGUID(guid);
         var guidMap = Core.PrefabCollectionSystem._PrefabLookupMap.GuidToEntityMap;
         if (!guidMap.TryGetValue(pg, out Entity prefab) || !prefab.Exists()) return false;
@@ -793,7 +843,7 @@ internal sealed class ObjectSpawnService
         if (IsSpawnChainController(prefab)) return false;
         if (IsNonObject(name, prefab)) return false;
         if (!Settings.ObjectSpawn_IncludeCastleBuildables.Value && prefab.Has<BlueprintData>()) return false;
-        return IsPlaceableObject(prefab);
+        return HasTileComponent(prefab);
     }
 
     /// <summary>Scrub a player's unlocks of GUIDs that aren't real placeable objects (stale CHAR_/V Blood
@@ -1306,9 +1356,13 @@ internal sealed class ObjectSpawnService
     // NetworkId, while every visible category (furniture, lights, containers, resource nodes, stairs)
     // has it. Requiring NetworkId is the principled fix for the whole invisible-spawn class — far more
     // robust than chasing name families one at a time.
-    static bool IsPlaceableObject(Entity prefab) =>
-        (prefab.Has<TilePosition>() || prefab.Has<EditableTileModel>() || prefab.Has<CastleHeartConnection>())
-        && prefab.Has<NetworkId>();
+    /// <summary>Carries a tile/placement component (tile model, castle buildable, or castle-owned object) —
+    /// the "is it a placeable shape at all?" half of <see cref="IsPlaceableObject"/>, split out so the admin
+    /// 'force' path can accept a genuine tile model that is merely non-networked (would spawn invisible).</summary>
+    static bool HasTileComponent(Entity prefab) =>
+        prefab.Has<TilePosition>() || prefab.Has<EditableTileModel>() || prefab.Has<CastleHeartConnection>();
+
+    static bool IsPlaceableObject(Entity prefab) => HasTileComponent(prefab) && prefab.Has<NetworkId>();
 
     /// <summary>The longest non-numeric token of a prefab name — a search hint for the real object.</summary>
     static string DiscoveryHint(string name)
@@ -1470,12 +1524,14 @@ internal sealed class ObjectSpawnService
     // below it). A castle wall/storey is ~2.5m tall.
     const float OverlapHeightBand = 2.5f;
 
-    // Horizontal proximity floor (~one tile) for the overlap test. The integer tile-cell test only trips
-    // when two anchor cells are IDENTICAL, so a free-aim MOVE that lands a fraction of a tile away
-    // (straddling a cell boundary) visually overlaps but slips through. This center-to-center distance
-    // catches that near-stacking. NOT applied to walls — a wall sits on a tile boundary and decor placed
-    // flush against it is legitimate; only the exact-cell test should bite a drop INTO a wall's own cell.
-    const float OverlapMinDistance = 0.5f;
+    // Horizontal proximity floor for the overlap test — now admin-configurable via
+    // ObjectSpawn.OverlapMinDistance (default 0.5m ≈ one tile). The integer tile-cell test only trips when
+    // two anchor cells are IDENTICAL, so a free-aim MOVE that lands a fraction of a tile away (straddling a
+    // cell boundary) visually overlaps but slips through; this center-to-center distance catches that
+    // near-stacking. Admins can LOWER it (toward 0) to place décor closer together, or 0 to disable the
+    // distance check entirely (only the exact-cell block remains). NOT applied to walls — a wall sits on a
+    // tile boundary and décor placed flush against it is legitimate; only the exact-cell test bites a drop
+    // INTO a wall's own cell.
 
     /// <summary>
     /// Strict placement guard (config <c>ObjectSpawn.PreventOverlap</c>): would a spawn at
@@ -1492,6 +1548,7 @@ internal sealed class ObjectSpawnService
         blockerName = null;
         if (!Settings.ObjectSpawn_PreventOverlap.Value) return false;
 
+        float minDist = math.max(0f, Settings.ObjectSpawn_OverlapMinDistance.Value);
         int2 cell = ConvertPosToTile(pos);
         var builder = new EntityQueryBuilder(Allocator.Temp)
             .AddAll(new(Il2CppType.Of<PrefabGUID>(), ComponentType.AccessMode.ReadOnly))
@@ -1527,10 +1584,10 @@ internal sealed class ObjectSpawnService
                 bool hit = cell.x >= oMin.x && cell.x <= oMax.x && cell.y >= oMin.y && cell.y <= oMax.y;
                 // Proximity backstop for sub-cell straddles (the move gap): centers too close. Walls are
                 // exempt so decor can sit flush against them (the cell test still guards drops into a wall).
-                if (!hit && !e.Has<CastleWall>())
+                if (!hit && minDist > 0f && !e.Has<CastleWall>())
                 {
                     float dx = tr.Value.x - pos.x, dz = tr.Value.z - pos.z;
-                    if (dx * dx + dz * dz < OverlapMinDistance * OverlapMinDistance) hit = true;
+                    if (dx * dx + dz * dz < minDist * minDist) hit = true;
                 }
                 if (hit)
                 {
@@ -1556,13 +1613,14 @@ internal sealed class ObjectSpawnService
     /// error). See the `here`/`nearest` token in ObjectCommands.Spawn.
     /// </summary>
     public bool Spawn(Entity character, bool isAdmin, string prefabRef, int rotation, bool? breakable,
-                      bool playerBreakable, bool respawn, bool atFeet, out string message)
+                      bool playerBreakable, bool respawn, bool atFeet, bool force, out string message)
     {
         if (!TryResolvePrefab(prefabRef, out PrefabGUID guid, out Entity prefab, out string name, out string err))
         {
             message = err;
             return false;
         }
+        bool forcedInvisible = false; // admin 'force'-spawned a non-networked (likely invisible) object
 
         if (IsSpawnChainController(prefab))
         {
@@ -1584,11 +1642,31 @@ internal sealed class ObjectSpawnService
         // stale unlock so it stops showing in the list too.
         if (!IsRealPlaceableObject(guid._Value))
         {
-            if (Core.PlayerUnlock.Revoke(character.GetSteamId(), guid._Value))
-                Core.Log.LogInfo($"[Uriel SPAWN] removed stale non-object unlock {name}({guid._Value}) for {character.GetSteamId()}.");
-            message = $"{name} can't be spawned — it's a character, V Blood, ability, or internal prefab, " +
-                      "not a placeable world object. (If it was in your unlock list from an older version, it's now been removed.)";
-            return false;
+            // Two distinct cases: (a) a GENUINE tile-model object that's merely NON-NETWORKED — it would
+            // spawn invisible (e.g. a gameplay-effect zone: garlic/holy/cursed area, dynamic cloud). An
+            // admin can opt in with 'force' to test it. (b) Not a placeable object at all (character / V
+            // Blood / ability / internal) — always refused, and any stale unlock is scrubbed.
+            if (IsTileModelObject(guid._Value))
+            {
+                if (!(isAdmin && force))
+                {
+                    message = Clamp($"{name} is a NON-NETWORKED object — it would spawn INVISIBLE (you'd feel its effect, " +
+                        "e.g. an area buff/debuff zone, but not see a model), so it's kept out of the normal catalog. " +
+                        (isAdmin
+                            ? $"To place it anyway for testing, add 'force': '.uriel spawn {prefabRef} force'."
+                            : "Ask an admin to spawn it for testing."));
+                    return false;
+                }
+                forcedInvisible = true; // admin opted in — allow, and warn on success
+            }
+            else
+            {
+                if (Core.PlayerUnlock.Revoke(character.GetSteamId(), guid._Value))
+                    Core.Log.LogInfo($"[Uriel SPAWN] removed stale non-object unlock {name}({guid._Value}) for {character.GetSteamId()}.");
+                message = $"{name} can't be spawned — it's a character, V Blood, ability, or internal prefab, " +
+                          "not a placeable world object. (If it was in your unlock list from an older version, it's now been removed.)";
+                return false;
+            }
         }
 
         // Position: the player's feet when atFeet (UI button / explicit `here`), otherwise the
@@ -1625,7 +1703,10 @@ internal sealed class ObjectSpawnService
             return false;
         }
 
-        // PLAYER GATES (non-admins): Discovery access + affordability. Admins bypass both.
+        // PLAYER GATES (non-admins): Discovery access + per-object/global conditions + affordability.
+        // Admins bypass all of it. Conditions (MaxPerPlot / Cost / Permit*) are the admin-managed rules in
+        // object_conditions.json — per-object overrides global (see ObjectConditionsService).
+        var cond = Core.ObjectConditions.Resolve(guid._Value);
         int costItem = 0, costAmount = 0;
         if (!isAdmin)
         {
@@ -1637,8 +1718,21 @@ internal sealed class ObjectSpawnService
                     : $"You haven't unlocked {name}, and it isn't destroyable in the world — ask an admin to grant it ('.uriel grant').";
                 return false;
             }
-            costItem = Settings.ObjectSpawn_PrefabCostItem.Value;
-            costAmount = Settings.ObjectSpawn_PrefabCostStack.Value;
+            // MAX-PER-PLOT cap (e.g. an admin allows at most 3 of this object on a plot). Counts Uriel's
+            // own records of this prefab on the territory.
+            if (cond.MaxPerPlot > 0)
+            {
+                int onPlot = 0;
+                foreach (var r in _records) if (r.PrefabGuid == guid._Value && r.TerritoryIndex == territory) onPlot++;
+                if (onPlot >= cond.MaxPerPlot)
+                {
+                    message = $"You can have at most {cond.MaxPerPlot}x {name} on this plot ({onPlot} already placed). Remove one first ('.uriel despawn').";
+                    return false;
+                }
+            }
+            // COST — a per-object/global condition overrides the server-wide cost config when set.
+            if (cond.CostSpecified) { costItem = cond.CostItem; costAmount = cond.CostAmount; }
+            else { costItem = Settings.ObjectSpawn_PrefabCostItem.Value; costAmount = Settings.ObjectSpawn_PrefabCostStack.Value; }
             if (costItem != 0 && costAmount > 0 && !HasInventoryItems(character, costItem, costAmount))
             {
                 message = $"Building {name} costs {costAmount}x {new PrefabGUID(costItem).GetPrefabName()} — you don't have enough in your inventory.";
@@ -1647,6 +1741,19 @@ internal sealed class ObjectSpawnService
         }
 
         bool indestructible = !(breakable ?? !Settings.ObjectSpawn_Indestructible.Value);
+        // PERMISSION CONDITIONS (non-admins): an admin can deny a player the right to spawn a given object
+        // indestructible and/or with auto-respawn (per-object or global). Admins are never restricted.
+        if (!isAdmin)
+        {
+            if (indestructible && !cond.PermitIndestructible)
+            {
+                if (breakable == false) // player explicitly asked for indestructible
+                { message = $"{name} can't be spawned indestructible on this server — try '.uriel spawn {prefabRef} breakable'."; return false; }
+                indestructible = false; // default was indestructible → quietly downgrade to breakable
+            }
+            if (respawn && !cond.PermitRespawn)
+            { message = $"{name} can't be spawned with auto-respawn on this server."; return false; }
+        }
         // 'smashable'/'respawn' only make sense for a breakable object: an indestructible one can't be
         // destroyed (so nothing to respawn) and stays castle-adopted (so player-breakable is moot).
         if (indestructible) { playerBreakable = false; respawn = false; }
@@ -1680,7 +1787,8 @@ internal sealed class ObjectSpawnService
                         : playerBreakable ? "breakable by anyone (you included)"
                         : "breakable by raid/decay";
             string respawnNote = respawn ? " Auto-respawns when destroyed (until the castle is gone or you '.uriel despawn' it)." : "";
-            message = $"Spawned {name}{whereNote} ({mode}, rot {rotation & 3}).{costNote}{respawnNote} {adoptNote} " +
+            string invisibleNote = forcedInvisible ? " NOTE: non-networked — it likely renders INVISIBLE; you'll feel its effect but won't see a model. '.uriel despawn' still removes it." : "";
+            message = $"Spawned {name}{whereNote} ({mode}, rot {rotation & 3}).{costNote}{respawnNote}{invisibleNote} {adoptNote} " +
                       "Manage it with '.uriel move' / '.uriel rotate' / '.uriel despawn'.";
             return true;
         }
@@ -2251,11 +2359,34 @@ internal sealed class ObjectSpawnService
     /// </summary>
     public bool PurgeOrphans(Entity character, out string message)
     {
-        // One pass: collect the block coords of every plot that still has a LIVING heart. Disabled-included,
-        // so a streamed-out-but-alive castle still counts (its objects are NOT treated as orphans). A
-        // genuinely destroyed heart is absent from the query, so its plot's blocks won't be in the set.
+        if (!PurgeOrphansCore(out int removed, out int loaded, out int unresolved, out int heartCount, out int livingBlockCount))
+        {
+            message = $"Aborted — couldn't resolve any living castle plots ({heartCount} heart(s) seen). " +
+                      "Nothing was removed (safety guard). Try again once castles are loaded.";
+            return false;
+        }
+        Core.Log.LogInfo($"[Uriel SPAWN] server-wide orphan scan by admin {character.GetSteamId()}: removed {removed} orphan(s) of {loaded} loaded object(s); {unresolved} not loaded (kept). {livingBlockCount} living plot block(s), {heartCount} heart(s).");
+        string tail = unresolved > 0 ? $" {unresolved} object(s) weren't loaded and were skipped — re-run after they load if needed." : "";
+        message = removed == 0
+            ? $"Orphan scan complete — no orphaned Uriel objects found ({loaded} checked).{tail}"
+            : $"Orphan scan complete — removed {removed} orphaned Uriel object(s) (castle gone / no living heart governing them); {loaded} checked. Native objects were never touched.{tail}";
+        return true;
+    }
+
+    /// <summary>
+    /// Shared orphan-scan engine for the manual command (<c>.uriel purgeorphans</c>) and the periodic
+    /// mid-session sweep (<see cref="OrphanSweepTick"/>). Registry-driven, so ONLY Uriel's own objects can
+    /// ever be removed — native world objects are never at risk. Returns false (and removes nothing) if the
+    /// living-plot set comes back empty (a query glitch — a server with Uriel objects always has ≥1 heart),
+    /// the same safety abort the manual command relied on.
+    /// </summary>
+    bool PurgeOrphansCore(out int removed, out int loaded, out int unresolved, out int heartCount, out int livingBlockCount)
+    {
+        removed = loaded = unresolved = 0;
+        // Collect the block coords of every plot that still has a LIVING heart. Disabled-included, so a
+        // streamed-out-but-alive castle still counts (its objects are NOT orphans). A genuinely destroyed
+        // heart is absent from the query, so its plot's blocks won't be in the set.
         var livingBlocks = new HashSet<long>();
-        int heartCount;
         var heartBuilder = new EntityQueryBuilder(Allocator.Temp)
             .AddAll(new(Il2CppType.Of<CastleHeart>(), ComponentType.AccessMode.ReadOnly))
             .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
@@ -2269,17 +2400,10 @@ internal sealed class ObjectSpawnService
         }
         finally { hearts.Dispose(); }
 
-        // Safety: if we somehow resolved no living plots, refuse to run — otherwise EVERY object would look
-        // orphaned. A server hosting Uriel objects always has at least one heart; an empty result is a glitch.
-        if (livingBlocks.Count == 0)
-        {
-            message = $"Aborted — couldn't resolve any living castle plots ({heartCount} heart(s) seen). " +
-                      "Nothing was removed (safety guard). Try again once castles are loaded.";
-            return false;
-        }
+        livingBlockCount = livingBlocks.Count;
+        if (livingBlocks.Count == 0) return false; // safety abort — treat everything as NOT orphaned
 
         var index = BuildLiveIndex();
-        int removed = 0, loaded = 0, unresolved = 0;
         foreach (var r in new List<SpawnRecord>(_records))
         {
             Entity e = index.Resolve(r);
@@ -2294,11 +2418,120 @@ internal sealed class ObjectSpawnService
             }
         }
         if (removed > 0) SaveSync();
-        Core.Log.LogInfo($"[Uriel SPAWN] server-wide orphan scan by admin {character.GetSteamId()}: removed {removed} orphan(s) of {loaded} loaded object(s); {unresolved} not loaded (kept). {livingBlocks.Count} living plot block(s), {heartCount} heart(s).");
-        string tail = unresolved > 0 ? $" {unresolved} object(s) weren't loaded and were skipped — re-run after they load if needed." : "";
-        message = removed == 0
-            ? $"Orphan scan complete — no orphaned Uriel objects found ({loaded} checked).{tail}"
-            : $"Orphan scan complete — removed {removed} orphaned Uriel object(s) (castle gone / no living heart governing them); {loaded} checked. Native objects were never touched.{tail}";
         return true;
+    }
+
+    // ============================================================ periodic orphan sweep
+
+    /// <summary>Start the mid-session orphan sweep (called once at boot). No-op when disabled by config or
+    /// when the tick driver isn't running. Cleans up objects on a castle that is abandoned/destroyed
+    /// DURING a session, rather than waiting for the next boot's <c>PurgeOrphansOnBoot</c>.</summary>
+    public void StartOrphanSweepLoop()
+    {
+        if (!Settings.ObjectSpawn_AutoPurgeOrphans.Value) return;
+        if (!Tick.IsRunning) { Core.Log.LogWarning("[Uriel SPAWN] orphan sweep NOT started (tick driver unavailable)."); return; }
+        int seconds = Math.Max(30, Settings.ObjectSpawn_OrphanPollSeconds.Value);
+        Tick.RunRepeating(seconds * 60, OrphanSweepTick); // frames ≈ seconds × server fps; approximate cadence is fine
+        Core.Log.LogInfo($"[Uriel SPAWN] mid-session orphan sweep started (~{seconds}s cadence).");
+    }
+
+    /// <summary>One periodic sweep — purge orphaned objects whose castle is gone. Quiet unless it removes
+    /// something (so it doesn't spam the log every cycle).</summary>
+    void OrphanSweepTick()
+    {
+        if (!Settings.ObjectSpawn_AutoPurgeOrphans.Value) return;
+        if (_records.Count == 0) return;
+        if (PurgeOrphansCore(out int removed, out _, out _, out _, out _) && removed > 0)
+            Core.Log.LogInfo($"[Uriel SPAWN] mid-session orphan sweep removed {removed} object(s) on abandoned/destroyed castle(s).");
+    }
+
+    // ============================================================ admin spawn conditions (request 2)
+
+    /// <summary>Admin: set/clear a PER-OBJECT spawn condition (resolved prefab). Backs '.uriel objcfg'.</summary>
+    public bool ConfigureObject(string prefabRef, string field, string v1, string v2, out string message)
+    {
+        if (!TryResolvePrefab(prefabRef, out PrefabGUID guid, out _, out string name, out string err))
+        { message = err; return false; }
+        return ApplyCondition(guid._Value, name, field, v1, v2, out message);
+    }
+
+    /// <summary>Admin: set/clear a GLOBAL default spawn condition (applies to every object unless that
+    /// object overrides the field). Backs '.uriel objcfgglobal'.</summary>
+    public bool ConfigureGlobal(string field, string v1, string v2, out string message)
+        => ApplyCondition(null, "Global default", field, v1, v2, out message);
+
+    public string DescribeAllConditions() => Clamp(Core.ObjectConditions.DescribeAll());
+
+    /// <summary>Parse + apply one condition field for a layer (guid==null ⇒ global). Shared by both commands.</summary>
+    bool ApplyCondition(int? guid, string label, string field, string v1, string v2, out string message)
+    {
+        switch (field?.Trim().ToLowerInvariant())
+        {
+            case null:
+            case "":
+            case "show":
+                message = Core.ObjectConditions.DescribeLayer(guid, label);
+                return true;
+
+            case "max":
+            case "maxbaseunits":
+            case "maxperplot":
+                if (!int.TryParse(v1?.Trim(), out int max)) { message = "Usage: max <number> (0 = unlimited)."; return false; }
+                Core.ObjectConditions.SetMax(guid, max);
+                message = max > 0 ? $"{label}: max {max} per plot." : $"{label}: per-plot limit cleared (unlimited).";
+                return true;
+
+            case "cost":
+                // cost <amount> <itemGuid>   (amount 0 OR item 0 ⇒ free / cleared)
+                if (!int.TryParse(v1?.Trim(), out int amount)) { message = "Usage: cost <amount> <itemGuid> (amount 0 = free)."; return false; }
+                int item = 0;
+                if (amount > 0)
+                {
+                    if (!int.TryParse(v2?.Trim(), out item) || item == 0)
+                    { message = "Usage: cost <amount> <itemGuid> — give the item's PrefabGUID (e.g. '.uriel finditem ...')."; return false; }
+                }
+                Core.ObjectConditions.SetCost(guid, amount > 0 ? item : (int?)null, amount);
+                message = amount > 0
+                    ? $"{label}: costs {amount}x {new PrefabGUID(item).GetPrefabName()} ({item})."
+                    : $"{label}: spawning is free (cost cleared).";
+                return true;
+
+            case "indestructible":
+            case "permitindestructible":
+                if (!TryParseBoolOrClear(v1, out bool? pi)) { message = "Usage: indestructible <true|false|clear>."; return false; }
+                Core.ObjectConditions.SetPermitIndestructible(guid, pi);
+                message = $"{label}: indestructible {(pi is null ? "uses default (allowed)" : (pi.Value ? "allowed" : "denied — forced breakable"))}.";
+                return true;
+
+            case "respawn":
+            case "permitrespawn":
+                if (!TryParseBoolOrClear(v1, out bool? pr)) { message = "Usage: respawn <true|false|clear>."; return false; }
+                Core.ObjectConditions.SetPermitRespawn(guid, pr);
+                message = $"{label}: respawn {(pr is null ? "uses default (allowed)" : (pr.Value ? "allowed" : "denied"))}.";
+                return true;
+
+            case "clear":
+            case "reset":
+                Core.ObjectConditions.Clear(guid);
+                message = $"{label}: all conditions cleared (back to defaults).";
+                return true;
+
+            default:
+                message = "Fields: max <n> | cost <amount> <itemGuid> | indestructible <true|false> | respawn <true|false> | clear | show.";
+                return false;
+        }
+    }
+
+    static bool TryParseBoolOrClear(string s, out bool? value)
+    {
+        value = null;
+        s = s?.Trim().ToLowerInvariant();
+        switch (s)
+        {
+            case "clear": case "reset": case "default": case "unset": value = null; return true;
+            case "true": case "on": case "yes": case "1": case "allow": case "allowed": value = true; return true;
+            case "false": case "off": case "no": case "0": case "deny": case "denied": value = false; return true;
+            default: return false;
+        }
     }
 }

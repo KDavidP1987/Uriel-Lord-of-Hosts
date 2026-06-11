@@ -26,6 +26,7 @@ internal static class Core
     public static ItemCatalogService ItemCatalog { get; private set; }
     public static StairSwapService StairSwap { get; private set; }
     public static ObjectSpawnService ObjectSpawn { get; private set; }
+    public static ObjectConditionsService ObjectConditions { get; private set; }
     public static PlayerUnlockService PlayerUnlock { get; private set; }
 
     public static ManualLogSource Log => Plugin.PluginLog;
@@ -70,6 +71,8 @@ internal static class Core
             StairSwap = new StairSwapService();
             PlayerUnlock = new PlayerUnlockService();
             PlayerUnlock.Load();
+            ObjectConditions = new ObjectConditionsService();
+            ObjectConditions.Load();
             ObjectSpawn = new ObjectSpawnService();
             ObjectSpawn.Load();
             // Restore spawned-object state: re-apply Immortal/decay, rebuild the live cache,
@@ -79,6 +82,10 @@ internal static class Core
             // Periodic auto-respawn for objects spawned with the 'respawn' flag (config-gated).
             try { ObjectSpawn.StartRespawnLoop(); }
             catch (System.Exception ex) { Log.LogWarning($"[Uriel SPAWN] respawn loop start failed: {ex}"); }
+            // Periodic orphan sweep so objects on an abandoned/destroyed plot are cleaned up
+            // mid-session, not only at the next boot (config-gated).
+            try { ObjectSpawn.StartOrphanSweepLoop(); }
+            catch (System.Exception ex) { Log.LogWarning($"[Uriel SPAWN] orphan sweep start failed: {ex}"); }
             PublicStorage = new PublicStorageService();
             PublicStorage.Load();
             // Placement teams are restored from the game save; our share state lives only

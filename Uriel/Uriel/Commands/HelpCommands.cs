@@ -4,7 +4,7 @@ namespace Uriel.Commands;
 
 /// <summary>
 /// Nested in-game help (`.uriel help [topic]`) — a clean, paginated alternative to VCF's flat
-/// `.help uriel` dump, so players without the BloodCraftHub UI can discover features without being
+/// `.help uriel` dump, so players without the Raphael companion UI can discover features without being
 /// overwhelmed. The top level lists feature topics; each topic prints its commands. Every reply is
 /// kept well under VCF's 512-byte chat cap; multi-command topics split across replies.
 /// </summary>
@@ -58,13 +58,15 @@ internal static class HelpCommands
                     "  .uriel grant | revoke <player> <obj> - (un)lock an object for a player\n" +
                     "  .uriel grantall <player> [all|destructible|indestructible]\n" +
                     "  .uriel block | unblock <guid>;  .uriel blocklist - forbid/allow prefabs\n" +
-                    "  .uriel spawnlist | purgeplot - list/clear objects on your plot\n" +
+                    "  .uriel spawnlist | purgeplot | purgeorphans - list/clear objects\n" +
+                    "  .uriel objcfg <obj> max|cost|indestructible|respawn ... - per-object player limits\n" +
+                    "  .uriel objcfgglobal ... | objcfglist - global defaults / list conditions\n" +
                     "  .uriel bossmap add|remove|list <vblood> <obj> - boss-defeat unlocks");
                 ctx.Reply(
                     "ADMIN - storage/stairs/tools (admin-only):\n" +
                     "  .uriel unshareall | unshareplayer <name> | sharedall | sharedebug\n" +
                     "  .uriel stairpurge | stairrefresh (experimental)\n" +
-                    "  .uriel api version|catalog|unlocked - machine API for BloodCraftHub");
+                    "  .uriel api version|catalog|unlocked - machine API for Raphael");
                 break;
 
             default:
