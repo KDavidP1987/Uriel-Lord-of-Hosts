@@ -15,8 +15,10 @@
 > 🔬 experimental / pending live validation · ⛔ not possible server-side
 > (BCH-only path) · 📋 planned, not yet implemented in Uriel.
 >
-> **Cross-workspace boundary.** BCH lives at
-> `C:\Users\KDPen\OneDrive\Documents\CURSOR PROJECTS\Games\V Rising\BloodCraftUI 2\`.
+> **Cross-workspace boundary.** BCH (now Raphael) lives at
+> `C:\dev\projects\Games\V Rising\Raphael Lord of Wisdom\Raphael\` (repo
+> `KDavidP1987/Raphael-Lord-of-Wisdom`); the legacy `BloodCraftUI 2\BloodCraftHub\`
+> repo is frozen at v0.30.0.
 > The two repos never cross-edit (same rule as Beelzebub↔BCH). All integration
 > flows through the **chat-command API** below — exactly how BCH already talks
 > to Bloodcraft and Beelzebub. This doc is the contract; implementation
@@ -352,9 +354,27 @@ token.
 - **`.uriel rotate [0-3]`** — rotates the nearest spawned object in place (no destination point). **Bare**
   = one 90° step; optional `0-3` sets an absolute tile rotation. No position token needed.
 - **`.uriel despawn`** — removes the nearest spawned object (targets by the player's feet). **Bare.**
+- **`.uriel raise [metres]` / `.uriel lower [metres]`** (new 2026-07-11) — nudge the nearest spawned
+  object's HEIGHT up/down so it sits flush with the ground (default `0.25`; X/Z unchanged). Targets the
+  nearest object by the player's feet — **bare** (no position token). A BCH object panel can surface these
+  as up/down height buttons alongside move/rotate. Plain-text reply. Owned-plot only for non-admins.
 
 `nearest` is accepted as a synonym of `here` on spawn/move so BCH's existing "UI relays append `nearest`"
 convention (§3, used for storage/stairs) extends here unchanged.
+
+**Persistent flush-to-ground offset (new 2026-07-11):** admins can set a permanent per-prefab (or global)
+vertical offset — `.uriel objcfg <name|guid> yoffset <metres>` / `.uriel objcfgglobal yoffset <metres>` —
+auto-applied to every spawn/move of that object so it always sits flush. This is a NEW `objcfg` field
+(alongside `max`/`cost`/`indestructible`/`respawn`), so a BCH admin-conditions panel gains one more numeric
+field; unlike the others it applies to admins too (a placement correction, not a player gate). No wire shape
+changed — same `.uriel objcfg` command surface.
+
+**Catalog CONTENT reduced (new 2026-07-11) — no wire/format change:** the placeable catalog (and thus the
+`[URIEL:catalog]` / `[URIEL:object]` stream and totals) now EXCLUDES hazard/exploit prefabs (all
+teleport/portal/mine gates, endless NPC-wave spawners, the arena duel anchor, invisible test props, the
+bone-hide pickup exploit) and **all world containers** (world chests, bookshelves, cabinets, drawers,
+stashes — they lagged/crashed the server). BCH needs no change — the wire format and field set are identical;
+only the set of objects (and the `total`/`discoverable` counts) is smaller. Coffins are unaffected.
 
 **Overlap refusal (new 2026-06-09):** `.uriel spawn` and `.uriel move` can now be REFUSED when the target
 tile is already occupied by a non-floor build piece (wall/station/native prop) or another spawned object —

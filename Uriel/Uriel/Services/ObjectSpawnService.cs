@@ -269,6 +269,11 @@ internal sealed class ObjectSpawnService
     {
         public readonly Dictionary<(int, int, int), Entity> ByTile = new();
         public readonly Dictionary<int, List<Entity>> ByGuid = new();
+        // Flat list of every indexed tile object, so a single world snapshot can serve BOTH record
+        // resolution AND the overlap scan within one command (the overlap guard reads each entity's
+        // components live, but no longer runs its OWN full-world ToEntityArray — that duplicate query
+        // was a big part of the '.uriel move' server hitch, 2026-07-11).
+        public readonly List<Entity> All = new();
 
         public Entity Resolve(SpawnRecord r)
         {
@@ -310,6 +315,7 @@ internal sealed class ObjectSpawnService
                 var e = entities[i];
                 if (!e.TryGetComponent<PrefabGUID>(out var g)) continue;
                 if (!e.TryGetComponent<TilePosition>(out var tp)) continue;
+                index.All.Add(e);
                 index.ByTile[(g._Value, tp.Tile.x, tp.Tile.y)] = e;
                 if (!index.ByGuid.TryGetValue(g._Value, out var list))
                     index.ByGuid[g._Value] = list = new List<Entity>();
@@ -323,10 +329,10 @@ internal sealed class ObjectSpawnService
     /// <summary>Find the registry record whose live entity is nearest to <paramref name="pos"/>
     /// (within <paramref name="maxDist"/>), re-resolving each record to its current entity. Registry-
     /// driven, so it keeps targeting objects across relog/restart — not just this session's spawns.</summary>
-    (Entity Entity, SpawnRecord Record) NearestSpawnedRecord(float3 pos, float maxDist)
+    (Entity Entity, SpawnRecord Record) NearestSpawnedRecord(float3 pos, float maxDist, LiveIndex index = null)
     {
         if (_records.Count == 0) return (Entity.Null, null);
-        var index = BuildLiveIndex();
+        index ??= BuildLiveIndex();
         float bestSq = maxDist * maxDist;
         Entity best = Entity.Null;
         SpawnRecord bestRec = null;
@@ -756,6 +762,33 @@ internal sealed class ObjectSpawnService
     // these lead with TM_ so it's a substring test, not a prefix). Add new confirmed marker families here.
     static readonly string[] InvisibleMarkerFragments = { "InvisibleObject", "IdleInteractionLocation" };
 
+    // CONTAINERS — blocked wholesale (owner decision, 2026-07-11). World storage containers attach/replicate
+    // an inventory at spawn: the pre-filled "_Full" loot ones CRASH the server (caught structurally by
+    // DropInInventoryOnSpawn), and a live tester reported even the EMPTY ones LAG the server badly on
+    // placement/move. The "_Empty" shells are structurally bare on the prefab template (no InventoryOwner —
+    // the inventory is added at runtime), so no component signal catches them; V Rising's container naming is
+    // consistent, so we match by name family. Verified against the full prefab dump: these fragments hit ONLY
+    // containers (WorldChest / CarriageChest / CarriageContainer / Stash / Bookshelf / Cabinet / Drawers) with
+    // zero décor false-positives. NOTE the deliberate omissions: "Coffin" is NOT here (it would wrongly catch
+    // respawn coffins, servant coffins, and catacomb coffin décor), and the buildable TM_Castle_Container_*
+    // pieces are already excluded by the BlueprintData / IncludeCastleBuildables filter.
+    static readonly string[] ContainerFragments =
+        { "Chest", "Container", "Stash", "Bookshelf", "Cabinet", "Drawer" };
+
+    // HAZARD / EXPLOIT families a live tester flagged (2026-07-11) that lack a single clean shared component,
+    // so they're matched by narrow, dump-verified name fragments (each hits only hazard prefabs):
+    //  - CarriagePrisonerRelease : gameplay-event SPAWNERS that endlessly spawn waves of NPCs ("spawns
+    //    everything for years") — 4 prefabs.
+    //  - CenterPoint : Undead_ArenaChampion_CenterPoint, an invisible duel/contest anchor (exactly 1 prefab;
+    //    the broader "ArenaChampion" token was rejected — 104 hits incl. the legit V-blood boss).
+    //  - ProfessorCoil : TM_ProfessorCoil (invisible) + ProfessorCoilBeam.
+    //  - LightningAttractor : TM_AmbientLightningAttractor_*_Test (ambient-lightning hazard/test prop).
+    // The portal/gate/warp family (WarpRift nodes, ExitGate, both mine gates, the general/quartz entrance
+    // gates, InteractablePortalExit/Enter) is caught STRUCTURALLY below via ChunkPortal — one component covers
+    // the whole teleport class (present and future) far more robustly than chasing names.
+    static readonly string[] HazardFragments =
+        { "CarriagePrisonerRelease", "CenterPoint", "ProfessorCoil", "LightningAttractor" };
+
     static bool IsNonObject(string name, Entity prefab)
     {
         foreach (var p in NonObjectPrefixes)
@@ -768,6 +801,11 @@ internal sealed class ObjectSpawnService
         //    invisible 2026-06-09). Matches "...Location" specifically — the *_IdleInteraction SUFFIX props
         //    (braziers, target dummies, mine cart) are REAL visible objects and lack the "Location" token.
         foreach (var frag in InvisibleMarkerFragments)
+            if (name.IndexOf(frag, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+        // Containers (owner-blocked wholesale) + tester-flagged hazard/exploit families — see the arrays above.
+        foreach (var frag in ContainerFragments)
+            if (name.IndexOf(frag, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+        foreach (var frag in HazardFragments)
             if (name.IndexOf(frag, StringComparison.OrdinalIgnoreCase) >= 0) return true;
         // Component backstop — catches units the name filter could miss. EVERY character/NPC carries
         // Movement (verified across the CHAR_* dump: all 532 have it, alongside TilePosition which
@@ -790,7 +828,35 @@ internal sealed class ObjectSpawnService
         // probe, 2026-06-09.) Resource-node templates carry neither; empty containers stay placeable.
         return prefab.Has<Movement>() || prefab.Has<VBloodConsumeSource>()
             || prefab.Has<MicroPOIInstance>() || prefab.Has<CastleRoofOrnaments>()
-            || HasDropInInventoryOnSpawn(prefab);
+            || HasDropInInventoryOnSpawn(prefab)
+            // Teleport/portal class — ChunkPortal covers ALL warps/gates/portals (WarpRift nodes, ExitGate,
+            // Iron/Quartz mine gates, the general entrance gate, InteractablePortalExit/Enter) in one check,
+            // present and future. These are world-navigation links, never décor. (2026-07-11)
+            || SafeHas<ChunkPortal>(prefab)
+            // Free-resource-on-pickup EXPLOIT class — YieldResourcesOnPickup (e.g. TM_BoneHide_DeadDeer_01_Pickup:
+            // grants resources every time it's picked up). Deliberately distinct from YieldResourcesOnDamageTaken,
+            // which is what harvest NODES (veins/trees) use — those stay spawnable. (2026-07-11)
+            || SafeHas<YieldResourcesOnPickup>(prefab);
+    }
+
+    // Guarded generic component probe. Some V Rising component types are not registered in the IL2CPP
+    // TypeManager, so Has<T>() THROWS — and an unhandled throw during the catalog build aborts the WHOLE
+    // catalog (it did once with ExternalInventoryStartItems, 2026-06-09). Any NEW component check added to
+    // IsNonObject must go through here: it probes a type once and, if that type ever throws, disables just
+    // that one check (logged) instead of breaking the catalog. Cheap after the first call (dictionary hit).
+    static readonly Dictionary<Type, bool> _componentProbe = new();
+    static bool SafeHas<T>(Entity prefab)
+    {
+        var t = typeof(T);
+        if (_componentProbe.TryGetValue(t, out bool ok) && !ok) return false;
+        try { bool has = prefab.Has<T>(); _componentProbe[t] = true; return has; }
+        catch (Exception ex)
+        {
+            _componentProbe[t] = false;
+            Core.Log.LogWarning($"[Uriel SPAWN] component probe {t.Name} unavailable ({ex.Message}); " +
+                                "that hazard filter is disabled this session (catalog still builds).");
+            return false;
+        }
     }
 
     // Guarded probe for the container crash-filter. Some V Rising components (esp. generic/buffer types)
@@ -1543,62 +1609,53 @@ internal sealed class ObjectSpawnService
     /// <paramref name="ignore"/> excludes the object being moved (so a short move doesn't collide with
     /// itself). Returns true (with the blocker's name) when placement should be REFUSED.
     /// </summary>
-    bool WouldOverlap(float3 pos, Entity ignore, out string blockerName)
+    bool WouldOverlap(float3 pos, Entity ignore, out string blockerName, LiveIndex index = null)
     {
         blockerName = null;
         if (!Settings.ObjectSpawn_PreventOverlap.Value) return false;
 
         float minDist = math.max(0f, Settings.ObjectSpawn_OverlapMinDistance.Value);
         int2 cell = ConvertPosToTile(pos);
-        var builder = new EntityQueryBuilder(Allocator.Temp)
-            .AddAll(new(Il2CppType.Of<PrefabGUID>(), ComponentType.AccessMode.ReadOnly))
-            .AddAll(new(Il2CppType.Of<TilePosition>(), ComponentType.AccessMode.ReadOnly))
-            .AddAll(new(Il2CppType.Of<Translation>(), ComponentType.AccessMode.ReadOnly))
-            .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
-        var query = Core.EntityManager.CreateEntityQuery(ref builder);
-        var entities = query.ToEntityArray(Allocator.Temp);
-        bool overlap = false;
-        try
+        // Reuse the caller's world snapshot when one was already built this command (e.g. '.uriel move'
+        // builds ONE index and shares it with NearestSpawnedRecord + this guard), instead of running a
+        // second full-world ToEntityArray. Components are still read live per candidate below.
+        var snapshot = index ?? BuildLiveIndex();
+        foreach (var e in snapshot.All)
         {
-            for (int i = 0; i < entities.Length; i++)
-            {
-                var e = entities[i];
-                if (e == ignore) continue;
-                if (e.Has<Movement>()) continue;                         // units/players move — a character
-                                                                         // (incl. the caster's own body, which
-                                                                         // carries TilePosition) never blocks a
-                                                                         // build placement
-                if (e.Has<CastleFloor>()) continue;                      // floors are allowed under decor
-                if (!e.TryGetComponent<TilePosition>(out var tp)) continue;
-                if (!e.TryGetComponent<Translation>(out var tr)) continue;
-                if (math.abs(tr.Value.y - pos.y) > OverlapHeightBand) continue; // different building level
+            if (e == ignore) continue;
+            if (!e.Exists()) continue;
+            if (e.Has<Movement>()) continue;                         // units/players move — a character
+                                                                     // (incl. the caster's own body, which
+                                                                     // carries TilePosition) never blocks a
+                                                                     // build placement
+            if (e.Has<CastleFloor>()) continue;                      // floors are allowed under decor
+            if (!e.TryGetComponent<TilePosition>(out var tp)) continue;
+            if (!e.TryGetComponent<Translation>(out var tr)) continue;
+            if (math.abs(tr.Value.y - pos.y) > OverlapHeightBand) continue; // different building level
 
-                int2 oMin = tp.Tile, oMax = tp.Tile;
-                if (e.TryGetComponent<TileBounds>(out var tb))
-                {
-                    int2 ext = new int2(math.abs(tb.Value.Max.x - tb.Value.Min.x),
-                                        math.abs(tb.Value.Max.y - tb.Value.Min.y));
-                    oMax = new int2(tp.Tile.x + ext.x, tp.Tile.y + ext.y);
-                }
-                // The candidate's single anchor cell falls inside the existing object's tile box?
-                bool hit = cell.x >= oMin.x && cell.x <= oMax.x && cell.y >= oMin.y && cell.y <= oMax.y;
-                // Proximity backstop for sub-cell straddles (the move gap): centers too close. Walls are
-                // exempt so decor can sit flush against them (the cell test still guards drops into a wall).
-                if (!hit && minDist > 0f && !e.Has<CastleWall>())
-                {
-                    float dx = tr.Value.x - pos.x, dz = tr.Value.z - pos.z;
-                    if (dx * dx + dz * dz < minDist * minDist) hit = true;
-                }
-                if (hit)
-                {
-                    blockerName = e.GetPrefabGuid().GetPrefabName();
-                    overlap = true;
-                    break;
-                }
+            int2 oMin = tp.Tile, oMax = tp.Tile;
+            if (e.TryGetComponent<TileBounds>(out var tb))
+            {
+                int2 ext = new int2(math.abs(tb.Value.Max.x - tb.Value.Min.x),
+                                    math.abs(tb.Value.Max.y - tb.Value.Min.y));
+                oMax = new int2(tp.Tile.x + ext.x, tp.Tile.y + ext.y);
+            }
+            // The candidate's single anchor cell falls inside the existing object's tile box?
+            bool hit = cell.x >= oMin.x && cell.x <= oMax.x && cell.y >= oMin.y && cell.y <= oMax.y;
+            // Proximity backstop for sub-cell straddles (the move gap): centers too close. Walls are
+            // exempt so decor can sit flush against them (the cell test still guards drops into a wall).
+            if (!hit && minDist > 0f && !e.Has<CastleWall>())
+            {
+                float dx = tr.Value.x - pos.x, dz = tr.Value.z - pos.z;
+                if (dx * dx + dz * dz < minDist * minDist) hit = true;
+            }
+            if (hit)
+            {
+                blockerName = e.GetPrefabGuid().GetPrefabName();
+                return true;
             }
         }
-        finally { entities.Dispose(); }
-        return overlap;
+        return false;
     }
 
     // ============================================================ spawn
@@ -1684,6 +1741,13 @@ internal sealed class ObjectSpawnService
         else if (PublicStorageService.TryGetCharacterPosition(character, out var cp))
             pos = cp;
         else { message = "Could not read your position."; return false; }
+
+        // FLUSH-TO-GROUND: apply this prefab's persistent vertical offset so it sits on the ground instead of
+        // floating (e.g. TM_ChurchOfTheDamned_AltarBreakable01) or sinking (barrel shelves). Admins set it once
+        // per prefab with '.uriel objcfg <name> yoffset <n>' and it's auto-applied to every spawn/move (0 =
+        // none). Applies to admins too — it's a placement correction, not a player restriction.
+        float yOffset = Core.ObjectConditions.Resolve(guid._Value).YOffset;
+        if (yOffset != 0f) pos.y += yOffset;
 
         // PLACEMENT GATE: inside a castle plot (everyone); owned by the caller (non-admins).
         if (!CheckPlacement(character, isAdmin, pos, "placed", out Entity heart, out int territory, out string gateErr))
@@ -1951,7 +2015,10 @@ internal sealed class ObjectSpawnService
     {
         if (!PublicStorageService.TryGetCharacterPosition(character, out float3 feet))
         { message = "Could not read your position."; return false; }
-        var (target, rec) = NearestSpawnedRecord(feet, Settings.ObjectSpawn_MaxTargetDistance.Value);
+        // ONE world snapshot per command, shared by NearestSpawnedRecord + the overlap guard below (the two
+        // full-world scans used to run separately — a large part of the move/rotate/delete server hitch).
+        var snapshot = BuildLiveIndex();
+        var (target, rec) = NearestSpawnedRecord(feet, Settings.ObjectSpawn_MaxTargetDistance.Value, snapshot);
         if (target == Entity.Null)
         {
             message = $"No Uriel-spawned object within {Settings.ObjectSpawn_MaxTargetDistance.Value:F0}m to move. " +
@@ -1967,12 +2034,18 @@ internal sealed class ObjectSpawnService
         else
         { message = "Aim where you want it, then run '.uriel move' — or use '.uriel move here' to bring it to your location."; return false; }
 
+        // Flush-to-ground: re-apply this prefab's persistent vertical offset (set via
+        // '.uriel objcfg <name> yoffset <n>') so the object sits correctly on the new ground, exactly as it
+        // did on the original spawn. 0 (default) = no change.
+        float yOffset = Core.ObjectConditions.Resolve(target.GetPrefabGuid()._Value).YOffset;
+        if (yOffset != 0f) dest.y += yOffset;
+
         if (!CheckPlacement(character, isAdmin, dest, "moved", out Entity heart, out int territory, out string gateErr))
         { message = gateErr; return false; }
 
         string name = target.GetPrefabGuid().GetPrefabName();
         // Overlap gate (excluding the object itself, so a short move doesn't collide with its own cell).
-        if (WouldOverlap(dest, target, out string blocker))
+        if (WouldOverlap(dest, target, out string blocker, snapshot))
         { message = Clamp($"Can't move {name} there — it would overlap {blocker}. Aim at a clear spot."); return false; }
         if (!RespawnAt(target, rec, dest, CurrentRot(target), heart, territory, out _, out string err)) { message = err; return false; }
         Core.Log.LogInfo($"[Uriel SPAWN] moved {name} to ({dest.x:F1},{dest.y:F1},{dest.z:F1}){(toFeet ? " [at player]" : "")}.");
@@ -1998,6 +2071,30 @@ internal sealed class ObjectSpawnService
         if (!RespawnAt(target, rec, t.Value, newRot, heart, territory, out _, out string err)) { message = err; return false; }
         Core.Log.LogInfo($"[Uriel SPAWN] rotated {name} to rot {newRot}.");
         message = $"Rotated {name} to rotation {newRot}.";
+        return true;
+    }
+
+    /// <summary>Raise (+) or lower (-) the nearest spawned object by <paramref name="deltaY"/> metres — the
+    /// live, ad-hoc counterpart to the persistent per-prefab '.uriel objcfg yoffset'. X/Z are unchanged (same
+    /// plot), so only height moves; respawn-based like move/rotate. Owned-plot only for non-admins.</summary>
+    public bool Nudge(Entity character, bool isAdmin, float deltaY, out string message)
+    {
+        if (!TryGetTargetPosition(character, out float3 pos)) { message = "Could not read your position."; return false; }
+        var (target, rec) = NearestSpawnedRecord(pos, Settings.ObjectSpawn_MaxTargetDistance.Value);
+        if (target == Entity.Null)
+        { message = $"No Uriel-spawned object within {Settings.ObjectSpawn_MaxTargetDistance.Value:F0}m to raise/lower. (Stand near it.)"; return false; }
+        if (!target.TryGetComponent<Translation>(out var t)) { message = "Object has no position to adjust."; return false; }
+
+        // Position (x,z) is unchanged, so the plot is identical — gate on the object's current position.
+        if (!CheckPlacement(character, isAdmin, t.Value, "moved", out Entity heart, out int territory, out string gateErr))
+        { message = gateErr; return false; }
+
+        float3 dest = t.Value; dest.y += deltaY;
+        string name = target.GetPrefabGuid().GetPrefabName();
+        if (!RespawnAt(target, rec, dest, CurrentRot(target), heart, territory, out _, out string err)) { message = err; return false; }
+        Core.Log.LogInfo($"[Uriel SPAWN] nudged {name} by {deltaY:+0.###;-0.###}m to y={dest.y:F2}.");
+        message = $"{(deltaY >= 0f ? "Raised" : "Lowered")} {name} by {math.abs(deltaY):0.##}m (now y={dest.y:F2}). " +
+                  $"To make this the default for every {name}, set '.uriel objcfg {name} yoffset <n>'.";
         return true;
     }
 
@@ -2510,6 +2607,24 @@ internal sealed class ObjectSpawnService
                 message = $"{label}: respawn {(pr is null ? "uses default (allowed)" : (pr.Value ? "allowed" : "denied"))}.";
                 return true;
 
+            case "yoffset":
+            case "y":
+            case "height":
+                // yoffset <metres> (signed; 0 or 'clear' removes it). Auto-added to Translation.y on every
+                // spawn/move of this object so it sits flush with the ground (fixes floating/sunken prefabs).
+                string yraw = v1?.Trim();
+                if (string.IsNullOrEmpty(yraw))
+                { message = "Usage: yoffset <metres> (e.g. 0.4 to raise, -0.3 to lower, 0/clear to remove)."; return false; }
+                if (yraw.ToLowerInvariant() is "clear" or "reset" or "default" or "unset")
+                { Core.ObjectConditions.SetYOffset(guid, null); message = $"{label}: vertical offset cleared."; return true; }
+                if (!float.TryParse(yraw, System.Globalization.NumberStyles.Float,
+                                    System.Globalization.CultureInfo.InvariantCulture, out float y))
+                { message = "Usage: yoffset <metres> (e.g. 0.4 to raise, -0.3 to lower, 0/clear to remove)."; return false; }
+                Core.ObjectConditions.SetYOffset(guid, y == 0f ? (float?)null : y);
+                message = y == 0f ? $"{label}: vertical offset cleared."
+                                  : $"{label}: vertical offset {y:+0.##;-0.##}m — auto-applied to every spawn/move so it sits flush.";
+                return true;
+
             case "clear":
             case "reset":
                 Core.ObjectConditions.Clear(guid);
@@ -2517,7 +2632,7 @@ internal sealed class ObjectSpawnService
                 return true;
 
             default:
-                message = "Fields: max <n> | cost <amount> <itemGuid> | indestructible <true|false> | respawn <true|false> | clear | show.";
+                message = "Fields: max <n> | cost <amount> <itemGuid> | indestructible <true|false> | respawn <true|false> | yoffset <metres> | clear | show.";
                 return false;
         }
     }

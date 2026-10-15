@@ -98,6 +98,24 @@ internal static class ObjectCommands
         ctx.Reply(message);
     }
 
+    [Command("raise", description: "Raise the nearest object you spawned so it sits higher / flush with the ground. Optional amount in metres (default 0.25). Stand near the object. Usage: .uriel raise [metres]")]
+    public static void Raise(ChatCommandContext ctx, float amount = 0.25f)
+    {
+        if (!Ready(ctx)) return;
+        float a = amount <= 0f ? 0.25f : amount;
+        Core.ObjectSpawn.Nudge(ctx.Event.SenderCharacterEntity, ctx.Event.User.IsAdmin, a, out string message);
+        ctx.Reply(message);
+    }
+
+    [Command("lower", description: "Lower the nearest object you spawned so it sits lower / stops floating. Optional amount in metres (default 0.25). Stand near the object. Usage: .uriel lower [metres]")]
+    public static void Lower(ChatCommandContext ctx, float amount = 0.25f)
+    {
+        if (!Ready(ctx)) return;
+        float a = amount <= 0f ? 0.25f : amount;
+        Core.ObjectSpawn.Nudge(ctx.Event.SenderCharacterEntity, ctx.Event.User.IsAdmin, -a, out string message);
+        ctx.Reply(message);
+    }
+
     [Command("spawnlist", description: "List the Uriel-spawned objects on the castle plot you're standing in. Usage: .uriel spawnlist")]
     public static void SpawnList(ChatCommandContext ctx)
     {
@@ -235,7 +253,7 @@ internal static class ObjectCommands
         ctx.Reply(Core.ObjectSpawn.DescribeBlocked());
     }
 
-    [Command("objcfg", description: "Admin: set spawn conditions for ONE object (players only; admins bypass). Fields: max <n> (max per plot, 0=unlimited) | cost <amount> <itemGuid> (0=free) | indestructible <true|false> | respawn <true|false> | clear | show. Usage: .uriel objcfg <name|guid> <field> [v1] [v2]", adminOnly: true)]
+    [Command("objcfg", description: "Admin: set spawn conditions for ONE object. Fields: max <n> (max per plot, 0=unlimited) | cost <amount> <itemGuid> (0=free) | indestructible <true|false> | respawn <true|false> | yoffset <metres> (auto height-correct so it sits flush; applies to everyone) | clear | show. (max/cost/permits gate players only; yoffset applies to all.) Usage: .uriel objcfg <name|guid> <field> [v1] [v2]", adminOnly: true)]
     public static void ObjCfg(ChatCommandContext ctx, string prefab, string field = "show", string v1 = null, string v2 = null)
     {
         if (!Ready(ctx)) return;

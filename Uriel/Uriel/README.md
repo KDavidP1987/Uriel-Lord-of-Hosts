@@ -49,6 +49,9 @@ the map (GloomRot, Cursed Forest, dungeons, ruins). Spawn one at your aim point 
 or **at your own location** with the `here` flag (handy from a UI button) — inside
 your own plot; it's **indestructible and decay-proof by default**, and you
 move/rotate/remove it with `.uriel move` / `.uriel rotate` / `.uriel despawn`.
+If an object sits floating or half-buried, **nudge its height** with `.uriel raise`
+/ `.uriel lower` — or, as an admin, set a permanent per-object correction with
+`.uriel objcfg <object> yoffset <metres>` so it always sits flush.
 Everything you place persists across restarts and is **cleaned up automatically —
 during play, within a couple of minutes — if its castle is ever abandoned or
 destroyed** (and you can't keep building on a plot you've given up).
@@ -212,6 +215,7 @@ aiming — handy when a menu or UI panel has your aim ray pointing elsewhere
 |---|---|
 | `.uriel spawn <name\|guid> [rot 0-3] [flags…]` | Place an object you've unlocked at your aim point. Flags (any order, after the rotation): `breakable` (raid/decay), `smashable` (you can break it too), `respawn` (auto-returns until castle gone / despawned), `here` (place at YOUR location), `indestructible` (default) |
 | `.uriel move [here]` / `.uriel rotate [0-3]` / `.uriel despawn` | Move (to your aim, or `here` = your location) / turn / remove the nearest object you spawned |
+| `.uriel raise [m]` / `.uriel lower [m]` | Nudge the nearest object you spawned up / down so it sits flush with the ground (default 0.25m) |
 | `.uriel unlocks` | Your collected objects + collection % |
 | `.uriel catalog [page]` | Browse the full world-object catalog |
 | `.uriel findprefab <text>` | Search objects by name |
@@ -232,7 +236,7 @@ In **Discovery** mode you unlock objects by **destroying them in the world**; th
 | `.uriel forcepurgeplot` | Synonym for `purgeplot` (live spawns + records; native objects never touched). The old chain sweep was removed — it could delete native resources |
 | `.uriel purgeorphans` | **Server-wide cleanup** — scan the whole map and remove orphaned Uriel objects (castle gone, or no living heart governing them). Only Uriel's objects are touched; a backup for the automatic boot-time cleanup |
 | `.uriel bossmap add\|remove\|list <vblood> <obj>` | Curate which objects a V-blood defeat unlocks |
-| `.uriel objcfg <name\|guid> <field> [v1] [v2]` | Per-object player limits: `max <n>` (per plot), `cost <amount> <itemGuid>`, `indestructible <true\|false>`, `respawn <true\|false>`, `clear`, `show` |
+| `.uriel objcfg <name\|guid> <field> [v1] [v2]` | Per-object rules: `max <n>` (per plot), `cost <amount> <itemGuid>`, `indestructible <true\|false>`, `respawn <true\|false>` (these gate players only) · `yoffset <metres>` (permanent flush-to-ground height, applies to everyone) · `clear`, `show` |
 | `.uriel objcfgglobal <field> [v1] [v2]` · `.uriel objcfglist` | Global default condition (per-object overrides it) · list all conditions |
 | `.uriel api version\|catalog\|unlocked` | Machine API for Raphael |
 </details>

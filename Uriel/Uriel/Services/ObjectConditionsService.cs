@@ -41,10 +41,14 @@ internal sealed class ObjectConditionsService
         public int? CostAmount { get; set; }
         public bool? PermitIndestructible { get; set; }
         public bool? PermitRespawn { get; set; }
+        // Vertical placement offset (metres) auto-added to Translation.y on every spawn/move, so a prefab
+        // whose pivot floats above / sinks below the ground sits flush. Unlike the other fields this is NOT a
+        // player restriction — it applies to admins too (a placement correction). null = none.
+        public float? YOffset { get; set; }
 
         public bool IsEmpty =>
             MaxPerPlot is null && CostItem is null && CostAmount is null
-            && PermitIndestructible is null && PermitRespawn is null;
+            && PermitIndestructible is null && PermitRespawn is null && YOffset is null;
     }
 
     /// <summary>The flattened, ready-to-enforce result of resolving a GUID against per-object + global.</summary>
@@ -56,10 +60,11 @@ internal sealed class ObjectConditionsService
         public readonly int CostAmount;
         public readonly bool PermitIndestructible;
         public readonly bool PermitRespawn;
-        public Effective(int max, bool costSpec, int costItem, int costAmt, bool permitInd, bool permitResp)
+        public readonly float YOffset;           // 0 = no vertical adjustment
+        public Effective(int max, bool costSpec, int costItem, int costAmt, bool permitInd, bool permitResp, float yOffset)
         {
             MaxPerPlot = max; CostSpecified = costSpec; CostItem = costItem; CostAmount = costAmt;
-            PermitIndestructible = permitInd; PermitRespawn = permitResp;
+            PermitIndestructible = permitInd; PermitRespawn = permitResp; YOffset = yOffset;
         }
     }
 
@@ -120,6 +125,7 @@ internal sealed class ObjectConditionsService
         dst.CostAmount = src.CostAmount;
         dst.PermitIndestructible = src.PermitIndestructible;
         dst.PermitRespawn = src.PermitRespawn;
+        dst.YOffset = src.YOffset;
     }
 
     /// <summary>Resolve the effective condition for a prefab GUID (per-object over global over fallback).</summary>
@@ -134,7 +140,8 @@ internal sealed class ObjectConditionsService
         int costAmt = costLayer?.CostAmount ?? 0;
         bool permInd = o?.PermitIndestructible ?? _global.PermitIndestructible ?? true;
         bool permResp = o?.PermitRespawn ?? _global.PermitRespawn ?? true;
-        return new Effective(max, costSpec, costItem, costAmt, permInd, permResp);
+        float yOffset = o?.YOffset ?? _global.YOffset ?? 0f;
+        return new Effective(max, costSpec, costItem, costAmt, permInd, permResp, yOffset);
     }
 
     public bool HasAnyConditions => _byGuid.Count > 0 || !_global.IsEmpty;
@@ -182,6 +189,14 @@ internal sealed class ObjectConditionsService
         SaveSync();
     }
 
+    public void SetYOffset(int? guid, float? offset)
+    {
+        var c = LayerFor(guid, create: true);
+        c.YOffset = (offset is null or 0f) ? null : offset;   // 0 clears it (no adjustment)
+        Prune(guid);
+        SaveSync();
+    }
+
     /// <summary>Clear every override for one object (or reset the global layer when guid is null).</summary>
     public void Clear(int? guid)
     {
@@ -213,6 +228,7 @@ internal sealed class ObjectConditionsService
         if (c.CostItem is int ci) parts.Add(ci == 0 ? "free" : $"cost {c.CostAmount ?? 0}x {new PrefabGUID(ci).GetPrefabName()}");
         if (c.PermitIndestructible is bool pi) parts.Add($"indestructible={(pi ? "allowed" : "denied")}");
         if (c.PermitRespawn is bool pr) parts.Add($"respawn={(pr ? "allowed" : "denied")}");
+        if (c.YOffset is float y) parts.Add($"yoffset {y:+0.##;-0.##}m");
         return parts.Count == 0 ? "(none)" : string.Join(", ", parts);
     }
 

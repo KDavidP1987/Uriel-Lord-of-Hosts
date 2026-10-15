@@ -8,6 +8,80 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.20.0] - 2026-07-11
+
+Object Spawning: live-tester feedback pass — hazard/exploit + container blacklist, flush-to-ground
+vertical offset (Kindred-Schematics-style `yoffset` + live `raise`/`lower`), and a first
+server-lag reduction on move/rotate/delete. Compiles clean (0 warnings); awaiting live validation on
+the reporter's server.
+
+### Added — flush-to-ground vertical placement (fixes floating / sunken objects)
+
+- Objects like `TM_ChurchOfTheDamned_AltarBreakable01` spawned floating above the ground, and the
+  vineyard barrel shelves spawned ~60% underground, because a prefab's mesh pivot isn't at its base and
+  Uriel placed the pivot at the aim/ground height. Two complementary controls, mirroring Kindred
+  Schematics' `.build yoffset`:
+  - **`.uriel raise [metres]` / `.uriel lower [metres]`** (default `0.25`) — live nudge the nearest
+    spawned object's height (X/Z unchanged; respawn-based like move/rotate). Owned-plot only for
+    non-admins. The reply hints how to make the value permanent.
+  - **`.uriel objcfg <name|guid> yoffset <metres>`** (and `objcfgglobal`) — a **persistent per-prefab
+    (or global) vertical offset** stored in `object_conditions.json` and auto-applied to `Translation.y`
+    on every spawn AND move of that object. Dial an offset in once and every future placement self-corrects.
+    Unlike the other condition fields this applies to **admins too** (it's a placement correction, not a
+    player restriction). `0` / `clear` removes it. New `Cond.YOffset` field + `Effective.YOffset` in
+    `ObjectConditionsService` (resolution per field: per-object → global → 0).
+
+### Added / Changed — blacklist: hazard, exploit, and container prefabs excluded
+
+Reported by a live tester; verified against the full prefab dump for exact names and zero-false-positive
+signals. All are excluded from the catalog, discovery, and the spawn path (structural, universal — the
+same layer as the existing crash-container filter):
+
+- **Teleport/portal/gate/warp class → structural `ChunkPortal` component.** One check covers the whole
+  family, present and future: `TM_Dracula_WarpRift_*` (Entrance/ExitNode/GoToDemise/LeaveFight),
+  `TM_ExitGate_01`, `TM_General_Entrance_Gate`, `TM_IronMineEntranceGate_01(_DONTUSE)`, the Quartz mine
+  gate, `TM_InteractablePortalExit/Enter_Radius3`. These teleport players / are invisible links — never décor.
+- **Free-resource-on-pickup EXPLOIT class → structural `YieldResourcesOnPickup` component** (e.g.
+  `TM_BoneHide_DeadDeer_01_Pickup`, which grants resources on every pickup). Deliberately distinct from
+  `YieldResourcesOnDamageTaken` (harvest veins/trees), so resource **nodes** stay spawnable.
+- **Tester-flagged one-offs → narrow, dump-verified name fragments** (each matches only hazard prefabs):
+  `CarriagePrisonerRelease` (endless NPC-wave spawners, 4 prefabs), `CenterPoint`
+  (`Undead_ArenaChampion_CenterPoint` invisible duel anchor — the broad `ArenaChampion` token was rejected
+  as it also hits the legit V-blood boss), `ProfessorCoil` (invisible test prop + its beam),
+  `LightningAttractor` (`TM_AmbientLightningAttractor_*_Test`).
+- **Containers blocked wholesale (owner decision).** Empty world storage containers were reported to lag
+  the server badly on placement (the pre-filled `_Full` ones already crash it and were blocked in v0.18.1).
+  The `_Empty` shells carry no `InventoryOwner` on the template (inventory attaches at runtime), so they're
+  matched by name family — verified to hit only containers: `Chest`, `Container`, `Stash`, `Bookshelf`,
+  `Cabinet`, `Drawer`. **`Coffin` is deliberately NOT included** (it would wrongly catch respawn coffins,
+  servant coffins, and catacomb décor); buildable `TM_Castle_Container_*` pieces were already excluded via
+  the `BlueprintData` / `IncludeCastleBuildables` filter.
+- New guarded generic `SafeHas<T>` probe backs the two component checks: if a component type isn't
+  registered in the IL2CPP TypeManager (and `Has<T>()` throws), just that one filter disables itself
+  (logged) instead of aborting the whole catalog build — the lesson from the v0.18.1
+  `ExternalInventoryStartItems` incident, now reusable.
+
+### Changed — first server-lag reduction on move / rotate / delete
+
+- A live tester reported the **server** (not just the client) hitches on `.uriel move` / `.uriel rotate` /
+  hotkey-delete, compounding when repeated. `.uriel move` was running **two** full-world entity scans per
+  command (one to find the target, one for the overlap guard). `BuildLiveIndex` now also exposes a flat
+  entity list, and `NearestSpawnedRecord` / `WouldOverlap` accept a **shared snapshot** — `Move` builds it
+  **once** and hands it to both, halving the dominant per-command cost. The overlap guard no longer runs its
+  own `ToEntityArray`. Behavior is unchanged; the respawn-based move/rotate path is kept as-is (proven, avoids
+  the mega-static "invisible until restart" risk).
+- **Honest scope:** this removes the duplicate scan (best win on `move`); a single rapid-repeat operation
+  (`rotate`/`delete`) still costs ~one world scan plus the destroy+respawn each, so heavy spamming may still
+  hitch. If live testing shows it's not enough, the next levers are an in-place rotate (no respawn) and a
+  short-lived cross-command snapshot cache — deliberately deferred here as higher-risk.
+
+### Notes
+
+- New admin commands (`.uriel raise`, `.uriel lower`, the `objcfg yoffset` field) and the reduced catalog
+  (containers/hazards removed) are reflected in `docs/BCH_INTEGRATION_HANDOFF.md`.
+- Already-spawned hazard/container/invisible objects from before this build are **not** auto-removed — clear
+  them with `.uriel despawn` / `.uriel purgeplot` (you can target them even when invisible).
+
 ## [0.19.0] - 2026-06-10
 
 Object Spawning: abandoned/destroyed-plot cleanup + admin-managed spawn conditions.

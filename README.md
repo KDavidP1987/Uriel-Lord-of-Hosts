@@ -58,6 +58,7 @@ a menu has your aim ray pointing away).
 | `.uriel spawn <name\|guid> [rot 0-3] [flags…]` | Place an object you've unlocked at your aim point. Indestructible & decay-proof by default; flags (any order, after rotation): `breakable`, `smashable` (owner can break it), `respawn` (auto-returns), `here` (place at your location) |
 | `.uriel move [here]` | Move the nearest object you spawned to your aim point (or `here` = your location) |
 | `.uriel rotate [0-3]` | Rotate the nearest object you spawned (no arg = turn 90°) |
+| `.uriel raise [m]` / `.uriel lower [m]` | Nudge the nearest object up/down so it sits flush with the ground (default 0.25m) |
 | `.uriel despawn` | Remove the nearest object you spawned (refunds cost if enabled) |
 | `.uriel unlocks` | Your collected objects + collection % |
 | `.uriel catalog [page]` | Browse the full world-object catalog |
@@ -79,7 +80,7 @@ In **Discovery** mode you unlock objects by **destroying them in the world** (co
 | `.uriel forcepurgeplot` | Synonym for `purgeplot` (live spawns + records; native objects never touched). The old chain sweep was removed — it could delete native resources |
 | `.uriel purgeorphans` | Server-wide cleanup: scan the whole map and remove orphaned Uriel objects (castle gone / no living heart governing them). Backup for the boot-time orphan purge |
 | `.uriel bossmap add\|remove\|list <vblood> <obj>` | Curate which objects a V-blood defeat unlocks |
-| `.uriel objcfg\|objcfgglobal <field> …` · `.uriel objcfglist` | Set/list global + per-object spawn conditions for players: `max <n>` per plot, `cost <amount> <itemGuid>`, `indestructible <true\|false>`, `respawn <true\|false>` (admins themselves are unrestricted) |
+| `.uriel objcfg\|objcfgglobal <field> …` · `.uriel objcfglist` | Set/list global + per-object spawn conditions: `max <n>` per plot, `cost <amount> <itemGuid>`, `indestructible <true\|false>`, `respawn <true\|false>` (these gate players; admins unrestricted) · `yoffset <metres>` (permanent flush-to-ground height, applies to everyone) |
 | `.uriel api version\|catalog\|unlocked` | `[URIEL:*]` machine API for Raphael |
 </details>
 </details>

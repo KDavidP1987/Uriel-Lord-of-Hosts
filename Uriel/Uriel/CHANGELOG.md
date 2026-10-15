@@ -3,6 +3,24 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.20.0 (2026-07-11)
+
+- **New: sit objects flush with the ground.** Some objects spawned floating in the air (e.g. the Church of
+  the Damned altar) or half-buried (vineyard barrel shelves). Two fixes, like Kindred Schematics' yoffset:
+  `.uriel raise [m]` / `.uriel lower [m]` nudge the nearest object up/down on the spot (default 0.25m), and
+  admins can set a **permanent per-object height** with `.uriel objcfg <object> yoffset <m>` so every future
+  spawn/move of that object auto-corrects.
+- **Blocked: hazardous, invisible, and exploit objects.** A tester found objects that teleport you, spawn
+  endless enemy waves, hand out free resources on pickup, or are just invisible. These are now kept out of
+  the catalog and spawning: all warp/portal/mine gates, the Carriage-prisoner-release spawners, the arena
+  duel anchor, Professor Coil, the ambient-lightning test prop, and the bone-hide pickup exploit. (Already
+  placed ones aren't auto-removed — `.uriel despawn` or `.uriel purgeplot` them.)
+- **Blocked: world containers.** Empty world chests (and other storage containers — bookshelves, cabinets,
+  drawers, stashes) lagged the server when placed, so they're no longer spawnable. (The loot-filled versions
+  already crashed the server and were blocked earlier.) Coffins are NOT affected.
+- **Less server lag on move/rotate/delete.** Moving an object used to scan the whole world twice per command;
+  it now does that once. A first improvement — if heavy use still hitches, more is planned.
+
 ## 0.19.0 (2026-06-10)
 
 - **New (admin): per-object & global spawn conditions.** Control how players may spawn objects —

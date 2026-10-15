@@ -976,6 +976,64 @@ scripts actually tick on a grafted static entity is the open question this unblo
   remains). Walls remain exempt (the `!Has<CastleWall>()` guard is unchanged), so flush-to-wall placement
   is unaffected — the knob controls spacing to other non-wall objects.
 
+### Live-tester feedback pass — blacklist, flush-to-ground, move/rotate lag (2026-07-11, v0.20.0) — ✅ BUILT, ⏳ live-validation pending
+
+Three-part response to a live tester's report (server: local dedicated). All compiles clean (0 warnings);
+none live-validated yet.
+
+**1. Blacklist — hazard / exploit / container prefabs (structural where possible).** Verified every prefab
+against the full dump for exact names + the lowest-false-positive signal:
+- **Teleport/portal/gate/warp → `ChunkPortal` component** (`SafeHas<ChunkPortal>` in `IsNonObject`). ONE
+  structural check covers the whole class present + future: `TM_Dracula_WarpRift_*`
+  (Entrance 950546355 / ExitNode -959575891 / GoToDemise -140123614 / LeaveFight 1670626205), `TM_ExitGate_01`
+  (-394351506), `TM_General_Entrance_Gate` (200761932), `TM_IronMineEntranceGate_01` (734478859) + `_DONTUSE`
+  (1213728325), `TM_QuartzMineEntranceGate_01` (-1449219226), `TM_InteractablePortalExit_Radius3` (1239470018)
+  + `TM_InteractablePortalEnter_Radius3` (-16082476).
+- **Free-resource-on-pickup exploit → `YieldResourcesOnPickup` component.** Catches `TM_BoneHide_DeadDeer_01_Pickup`
+  (-1077231248, "resources every pickup") and the whole `*_Pickup` yield class. Deliberately NOT
+  `YieldResourcesOnDamageTaken` (harvest veins/trees) — resource NODES stay spawnable.
+- **Narrow name fragments** (each dump-verified as hitting only hazard prefabs): `CarriagePrisonerRelease`
+  (4 endless NPC-wave spawners), `CenterPoint` (`Undead_ArenaChampion_CenterPoint` -288427482 duel anchor —
+  the broad `ArenaChampion` was REJECTED: 104 hits incl. the legit V-blood boss), `ProfessorCoil` (1179186281
+  + `ProfessorCoilBeam`), `LightningAttractor` (`TM_AmbientLightningAttractor_Emanuel_Test` 1376997758).
+- **Containers blocked wholesale (owner decision).** Empty world containers lag the server on placement
+  (pre-filled `_Full` ones crash it — already blocked v0.18.1 via `DropInInventoryOnSpawn`). The `_Empty`
+  templates are **structurally bare** (no `InventoryOwner` — verified by reading `TM_WorldChest_Simple_01_Empty`;
+  the inventory attaches at runtime), so they're matched by name family, dump-verified to hit only containers:
+  `Chest`, `Container`, `Stash`, `Bookshelf`, `Cabinet`, `Drawer`. **`Coffin` deliberately EXCLUDED** (respawn
+  coffins, servant coffins for the Castle-Rentals vision, catacomb décor); buildable `TM_Castle_Container_*`
+  already excluded via `BlueprintData`/`IncludeCastleBuildables`. All the above live in `ContainerFragments` /
+  `HazardFragments` + the two `SafeHas` checks in `IsNonObject`, so they govern catalog + spawn + prune together.
+- **New guarded generic `SafeHas<T>`** (per-type usability cache) backs the component checks — an unregistered
+  IL2CPP type that throws disables just that filter (logged) instead of aborting the catalog build (the
+  v0.18.1 `ExternalInventoryStartItems` lesson, now reusable). Any future `IsNonObject` component check must use it.
+
+**2. Flush-to-ground vertical offset (Kindred-Schematics `yoffset` parity).** Objects floated
+(`TM_ChurchOfTheDamned_AltarBreakable01`) or sank (~60% — vineyard barrel shelves) because a prefab's mesh
+pivot isn't at its base while Uriel places the pivot at the ground/aim height. Two controls:
+- **Persistent per-prefab offset** — new `Cond.YOffset` (float) + `Effective.YOffset` in `ObjectConditionsService`
+  (resolution per-object → global → 0), set with `.uriel objcfg <name> yoffset <m>` / `objcfgglobal`. Applied to
+  `pos.y` in **both** `Spawn` and `Move` (the fresh-ground paths) — NOT in `ExecuteSpawn`/`RespawnAt`-from-record,
+  so auto-respawn/rotate reuse the already-offset stored position and never double-apply. Applies to admins too
+  (a placement correction, not a player gate). Persisted in `object_conditions.json`.
+- **Live nudge** — `.uriel raise [m]` / `.uriel lower [m]` (default 0.25) → `ObjectSpawnService.Nudge` re-heights
+  the nearest spawned object via `RespawnAt` (X/Z unchanged, current rotation preserved, overlap skipped like
+  rotate). Reply hints setting the same value as a permanent `objcfg yoffset`.
+
+**3. First move/rotate/delete server-lag reduction (safe query-scoping).** Tester: the SERVER hitches on
+`.uriel move`/`rotate`/hotkey-delete, worsening when repeated. `.uriel move` ran **two** full-world entity scans
+per command (target-find + overlap guard). Fix: `LiveIndex` now carries a flat `All` list; `NearestSpawnedRecord`
+and `WouldOverlap` accept a **shared snapshot**; `Move` builds it **once** and passes it to both (the overlap
+guard no longer runs its own `ToEntityArray`). Respawn-based move/rotate kept as-is (proven; avoids the
+mega-static invisible-until-restart risk). **Honest limits:** a single rapid-repeat op (rotate/delete) still
+costs ~one scan + the destroy/respawn each, so spamming may still hitch. Deferred (higher-risk) next levers if
+live-test says it's not enough: in-place rotate (no respawn) and a short-lived cross-command snapshot cache.
+
+**⏳ Live tests:** (1) `.uriel spawn` of any blacklisted GUID (e.g. a WarpRift, a world chest, `TM_ProfessorCoil`)
+→ refused as not a placeable object; catalog count drops. (2) `.uriel objcfg <floaty-object> yoffset 0.4` →
+subsequent spawns sit flush; `.uriel raise 0.5` / `lower 0.3` nudge live. (3) On the reporter's server, `.uriel
+move`/`rotate`/`despawn` a few objects on a built-up plot → less/no server hitch than before (compare to v0.19.0).
+
 ## References
 - KindredCommands (odjit, AGPL-3.0) — `Helper.ConvertPosToTileGrid`,
   `Services/CastleTerritoryService.cs` (position → heart). Technique only.
