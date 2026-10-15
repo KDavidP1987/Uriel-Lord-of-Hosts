@@ -1,0 +1,59 @@
+# door-control.vrs: Castle Events spike 7. Can the server open, close and lock a castle door, and does it hold units?
+# Door: the ground-floor wood door between courtyard A (south) and room H (north) at x -2030, z -1710 on plot 11.
+# Needs: CastleEvents.Enabled=true; Chaos vulnerable.
+ensure
+console TPHome
+wait 3
+mark
+chat .devtp -2030 -1714 5
+wait 3
+chat .uriel unit door show
+expect-log \[Uriel DOOR\] action=show ok=True TM_Castle_Wall_Door_Wood_Wide\S* x=-2030\.0 y=5\.0 z=-1710\.0
+chat .uriel unit door close
+expect-log \[Uriel DOOR\] action=close ok=True .* open=False
+wait 2
+shot full door-closed
+# --- closed: two thugs in room H do not come through to Chaos in the courtyard
+chat .devtp -2030 -1704 5
+wait 3
+chat .uriel unit spawn CHAR_Bandit_Thug 2
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug .*tracked=2
+wait 3
+chat .devtp -2030 -1714 5
+wait 8
+chat .uriel unit status 30
+expect-log \[Uriel UNIT\] status key=\d+ prefab=CHAR_Bandit_Thug x=\S+ y=\S+ z=-1(69\d|70\d)\.\d
+expect-log \[Uriel UNIT\] status key=\d+ prefab=CHAR_Bandit_Thug x=\S+ y=\S+ z=-1(69\d|70\d)\.\d
+# --- opened by the server: they come through
+chat .uriel unit door open
+expect-log \[Uriel DOOR\] action=open ok=True .* open=True
+wait 2
+shot full door-opened
+wait 8
+chat .uriel unit status 30
+expect-log \[Uriel UNIT\] status key=\d+ prefab=CHAR_Bandit_Thug x=\S+ y=\S+ z=-17(1\d|2\d)\.\d
+chat .uriel unit clear
+expect-reply Removing 2 unit(s) on this plot
+wait 3
+# --- lock: closed and locked, Chaos presses F at the door; it stays closed. Unlocked, F opens it.
+chat .uriel unit door close
+expect-log \[Uriel DOOR\] action=close ok=True .* open=False
+chat .uriel unit door lock
+expect-log \[Uriel DOOR\] action=lock ok=True .* locked=True
+chat .devtp -2030 -1711.8 5
+wait 2
+key f
+wait 3
+chat .uriel unit door show
+expect-log \[Uriel DOOR\] action=show ok=True .* open=False locked=True
+shot full door-locked-f
+chat .uriel unit door unlock
+expect-log \[Uriel DOOR\] action=unlock ok=True .* locked=False
+key f
+wait 3
+chat .uriel unit door show
+expect-log \[Uriel DOOR\] action=show ok=True .* open=True locked=False
+shot full door-unlocked-f
+chat .uriel unit door close
+expect-log \[Uriel DOOR\] action=close ok=True .* open=False
+console TPHome

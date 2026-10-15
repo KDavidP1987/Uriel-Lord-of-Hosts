@@ -1,0 +1,111 @@
+# castle-event.vrs: Castle Events Phase 2 MVP. A template, two groups each holding a door, a manual start, doors that
+# open only when their group is defeated, completion, and a stop that removes the units and puts the doors back.
+# Plot 11, ground floor: group gate1 = 2 thugs (template mob, floor 1) in courtyard A holding the wood door at
+# (-2030, -1710); group gate2 = 1 stalker (template boss, any floor) in room H holding the metal door at (-2030, -1695).
+# Needs: CastleEvents.Enabled=true; Chaos vulnerable; NyarDevTools (.devkill <guid> [radius]).
+ensure
+console TPHome
+wait 3
+mark
+chat .devtp -2014 -1705 5
+wait 3
+chat .uriel unit clear
+wait 2
+chat .uriel event stop
+chat .uriel event remove gate1
+chat .uriel event remove gate2
+chat .uriel template delete evtest
+wait 2
+# --- template: floor 1, any group: 2 thugs per mob marker; any floor, any group: 1 stalker per boss marker
+chat .uriel template create evtest
+expect-log \[Uriel EVENT\] template-created name=evtest owner=0
+chat .uriel template set evtest 1 * mob CHAR_Bandit_Thug 2
+expect-log \[Uriel EVENT\] template-set name=evtest floor=1 group=\* slot=mob units=CHAR_Bandit_Thug count=2
+chat .uriel template set evtest * * boss CHAR_Bandit_Stalker 1
+expect-log \[Uriel EVENT\] template-set name=evtest floor=\* group=\* slot=boss units=CHAR_Bandit_Stalker count=1
+# --- layout: gate1 in the courtyard, gate2 in room H
+chat .devtp -2030 -1717 5
+wait 3
+chat .uriel event marker gate1 mob - 0 0 room
+expect-log \[Uriel EVENT\] marker-added territory=11 group=gate1 id=\d+ slot=mob floor=1 .*prefab=template
+chat .devtp -2030 -1713 5
+wait 3
+chat .uriel event door gate1
+expect-log \[Uriel EVENT\] door-bound territory=11 group=gate1 TM_Castle_Wall_Door_Wood_Wide\S* x=-2030\.0 y=5\.0 z=-1710\.0
+chat .devtp -2030 -1702 5
+wait 3
+chat .uriel event marker gate2 boss - 0 0 room
+expect-log \[Uriel EVENT\] marker-added territory=11 group=gate2 id=\d+ slot=boss floor=1 .*prefab=template
+chat .devtp -2030 -1698 5
+wait 3
+chat .uriel event door gate2
+expect-log \[Uriel EVENT\] door-bound territory=11 group=gate2 \S+ x=-2030\.0 y=5\.0 z=-1695\.0
+chat .uriel event list
+expect-log \[Uriel EVENT\] layout territory=11 group=gate1 floor=1 door=-2030\.0,5\.0,-1710\.0 markers=1
+expect-log \[Uriel EVENT\] layout territory=11 group=gate2 floor=1 door=-2030\.0,5\.0,-1695\.0 markers=1
+# --- run 1: start from the small room east of the stairwell (out of both rooms' reach)
+chat .devtp -2014 -1705 5
+wait 3
+chat .uriel event start evtest
+expect-log \[Uriel EVENT\] door-held territory=11 group=gate1 .* open=False locked=True
+expect-log \[Uriel EVENT\] door-held territory=11 group=gate2 .* open=False locked=True
+expect-log \[Uriel EVENT\] started territory=11 template=evtest groups=2 units=3 doors=2 failedMarkers=0
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug .*tag=ev11:gate1
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug .*tag=ev11:gate1
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Stalker .*tag=ev11:gate2
+wait 3
+chat .uriel event status
+expect-log \[Uriel EVENT\] status territory=11 group=gate1 left=2 spawned=2 cleared=False door=held
+expect-log \[Uriel EVENT\] status territory=11 group=gate2 left=1 spawned=1 cleared=False door=held
+# --- a held door forced open is shut again within a second or two
+chat .devtp -2030 -1705 5
+wait 2
+chat .uriel unit door open
+expect-log \[Uriel DOOR\] action=open ok=True .*z=-1710\.0 open=True
+expect-log \[Uriel EVENT\] door-reshut territory=11 group=gate1
+wait 2
+chat .uriel unit door show
+expect-log \[Uriel DOOR\] action=show ok=True .*z=-1710\.0 open=False locked=True
+shot full held-doors
+# --- defeat gate1 (the thugs): its door opens, gate2's stays held
+chat .devtp -2030 -1705 5
+wait 2
+chat .devkill -301730941 30
+expect-log \[DEV KILL\] n=2 prefab=-301730941
+expect-log \[Uriel EVENT\] group-cleared territory=11 group=gate1 units=2 door=opened
+wait 3
+chat .devtp -2030 -1713 5
+wait 2
+chat .uriel unit door show
+expect-log \[Uriel DOOR\] action=show ok=True .*z=-1710\.0 open=True locked=False
+shot full gate1-open
+chat .uriel event status
+expect-log \[Uriel EVENT\] status territory=11 group=gate1 left=0 spawned=2 cleared=True door=open
+expect-log \[Uriel EVENT\] status territory=11 group=gate2 left=1 spawned=1 cleared=False door=held
+# --- defeat gate2 (the boss): its door opens and the event completes
+chat .devtp -2030 -1705 5
+wait 2
+chat .devkill -309264723 30
+expect-log \[DEV KILL\] n=1 prefab=-309264723
+expect-log \[Uriel EVENT\] group-cleared territory=11 group=gate2 units=1 door=opened
+expect-log \[Uriel EVENT\] complete territory=11 groups=2 seconds=\d+
+chat .devtp -2030 -1698 5
+wait 2
+chat .uriel unit door show
+expect-log \[Uriel DOOR\] action=show ok=True .*z=-1695\.0 open=True locked=False
+shot full gate2-open
+# --- run 2: start, then stop: units removed, doors put back as they were (both open, unlocked)
+chat .devtp -2014 -1705 5
+wait 3
+chat .uriel event start evtest
+expect-log \[Uriel EVENT\] started territory=11 template=evtest groups=2 units=3 doors=2 failedMarkers=0
+wait 4
+chat .uriel event stop
+expect-log \[Uriel EVENT\] stopped territory=11 units=3 doorsRestored=2
+wait 4
+chat .uriel unit list
+chat .devtp -2030 -1713 5
+wait 2
+chat .uriel unit door show
+expect-log \[Uriel DOOR\] action=show ok=True .*z=-1710\.0 open=True locked=False
+console TPHome

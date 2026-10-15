@@ -88,10 +88,10 @@ One short test each, a greppable `[uriel …]` log line per reading, results rec
 4. What do servants, defences and the heart do; does a unit hitting a structure count as raid damage? (§11.5)
 5. Do units in a castle with no players near stay alive and un-frozen? (§11.6)
 6. Do units die in sunlight through windows or open doors, and does that raise a `DeathEvent`? (§11.8)
-7. **Door control** (shared with roadmap #4 and Rentals): can the server lock and unlock a castle door for
-   non-owners? Rentals research says doors are gated client-side and per-player grants are clan-scoped. If no,
-   the fallback for gated doors is a **barrier object** spawned in the doorway and removed when the zone clears;
-   Object Spawning already does that.
+7. ~~**Door control**~~ **Answered (Session 4, `door-control.vrs` 15/15):** yes. Writing `Door.OpenState` opens or
+   closes a castle door (the game's DoorSystem swaps the collision and plays the animation; the client renders it),
+   and `Interactable.Disabled = true` stops anyone, the owner included, from opening it with F. A closed door holds
+   units; opened, they come through. No barrier object is needed.
 
 ### Phase 1 — unit spawner (admin only)
 
@@ -102,6 +102,9 @@ budgeted queues, config caps, boot sweep, refused-prefab list, `.uriel unit spaw
 Feature switch `[CastleEvents] Enabled`, default **off**.
 
 ### Phase 2 — spawn points (admin, then players at a cost)
+
+**Superseded by the alpha MVP** (owner, 2026-10-15; see "Phase 2 MVP as built"): markers, templates, manual runs
+and door gates landed together, pulling Phase 4's gates and Phase 3's start/stop/status forward.
 
 `.uriel point add <pool|prefab> [count] [mob|elite|boss] [zone]` at `here`, `point list / remove / show`, and
 `.uriel event preview` (spawn every point's units for a look, then clear). Persisted in `unit_points.json`. Players:
@@ -150,6 +153,13 @@ Decided (owner, 2026-10-15):
 5. **Containment** (vision 14): every unit always stays on its plot. Narrower scopes are per spawn today (per unit)
    and become a property of a spawn point and a zone default (per floor) in Phase 2: `room` (the game's room under
    the spawn spot; it ends at walls and doorways), `storey`, and a leash radius, combinable.
+
+6. **Alpha MVP** (owner, 2026-10-15): units set per floor across a castle, at a cost or by coordinates, triggered
+   manually; spawn markers that name their units, and boss spawns; templates a player or admin picks from; and
+   doors that stay shut while a group of units lives and open once it is defeated, in a sequence per event. The
+   model is layered: an event **template** has a sub-template per **floor**, and within it **groups** of units, each
+   group tied to a door. Test: a door, a group of units near it from that floor's template, and the door opens only
+   when all of them are dead.
 
 Open, for the owner (needed by Phase 3):
 
@@ -221,6 +231,46 @@ ContainCheckSeconds` (default 1).
 
 Watch: a returned unit drops only the players outside its scope, so a player standing in the doorway could pull it
 back out repeatedly. Session 2 saw one return per unit and no rubber-banding.
+
+## Phase 2 MVP as built (2026-10-15, unreleased)
+
+`Services/CastleEventService.cs`, `Services/CastleDoors.cs`, `Commands/EventCommands.cs` (`.uriel event`,
+`.uriel template`). Persisted in `BepInEx/config/Uriel/castle_events.json` (layouts, templates, doors held by a
+run), saved on every change and on unload.
+
+- **Layout** (one per castle plot): **groups**, each on a **floor**, each with **markers** and optionally one
+  **door**. A group is made by its first marker, on the floor its placer stands on. Floors are counted from the
+  castle's own floor heights: 1 + the number of floor levels (heights within 2 m are one level) more than 2 m below.
+  Plot 11: ground = 1, upstairs = 2.
+- **Marker:** a spot (where you stand), a slot `mob` or `boss`, optionally its own unit (else the template's), a
+  count and level (0 = the template's), and a containment (else `[CastleEvents] DefaultContain`, default `storey`).
+- **Door:** `.uriel event door <group>` binds the castle door nearest you (within 6 m) by position; one door per
+  group, one group per door.
+- **Template:** `[floor 1, 2, ... | *] -> [group | *] -> mob / boss -> units` (a list; one is picked at random per
+  marker per run), a count per marker, a level. A marker without its own unit takes the most specific entry:
+  floor+group, floor+*, *+group, *+*. An admin's template is a server template anyone may use; a player's is their own.
+- **Start** (`.uriel event start [template]`, manual): every marker must resolve and the units must fit under the caps
+  before anything spawns or is charged. Each group's door is shut and locked (its state remembered and saved); every
+  marker is queued through the unit spawner with the tag `ev<territory>:<group>`. Players on the plot get a message.
+- **Monitor** (about once a second): a group with no unit alive or queued is **cleared**: its door unlocks and opens,
+  and the players on the plot are told. A held door someone forced open is shut again. All groups cleared = the
+  event is complete (time logged and announced).
+- **Stop:** removes the run's units (and pending spawns) and puts every held door back as it was. A restart ends a
+  run: units are swept at boot as always, and saved held doors are put back. A door that can't be found stays
+  pending and is retried (every ~10 s, then every minute) until it is found or its castle is gone.
+- **Disabled entities:** castle doors and floors far from every player are Disabled (`DisableWhenNoPlayersInRange`);
+  `CastleDoors` and `CastleFloorIndex` query with `IncludeDisabled`. Found at boot: a default query saw zero doors.
+- **Who:** admins on any plot; castle owners (team match, so clan members) on their own plot when
+  `[CastleEvents] PlayerEvents` is on (default off). Players are capped at `MaxMarkersPerPlot` (40).
+- **Costs (players):** `MarkerCostItem` x `MarkerCostAmount` per mob marker, x `BossMarkerCostAmount` per boss marker,
+  refunded to the payer on removal; `RunCostItem` x `RunCostAmount` per start, not refunded. All 0 (free) by default.
+- **Log lines:** `[Uriel EVENT] loaded|marker-added|door-bound|door-unbound|removed|layout|template-created|template-set|
+  template-deleted|door-held|started|marker-failed|status|door-reshut|group-cleared|complete|stopped|door-released|
+  door-pending|door-abandoned|refused`; spawned units carry `tag=ev...` on `[Uriel UNIT] queued|spawned`.
+
+Not yet (later phases): a timer, level scaling to entrants, an event toll door, maze stair variants, event objects,
+rewards, Raphael wire lines. Untested: the player path (PlayerEvents, costs, refusal on another's castle) needs a
+second player.
 
 ## Testing
 
@@ -299,3 +349,27 @@ are separate rooms. On a stair, the floor lookup reads the ground stairwell up t
 - Logs: no Uriel errors or warnings; server log has no exceptions.
 - **Still open:** refusal on another player's castle (tester + Phase 2 player path); sunlight, servants, raid damage
   (spikes 4 and 6).
+
+### Session 4 · 2026-10-15 · door gates and the Phase 2 MVP (Claude via vrclient, world nyardev, plot 11)
+
+- `door-control.vrs`: **PASS 15/15** (spike 7). Server close holds two thugs in room H; server open lets them through;
+  locked, F doesn't open it; unlocked, F does. Screenshots show the door open and closed.
+- `castle-event.vrs`: **PASS 33/33** three times (last results `%TEMP%\vrclient\results\castle-event-20261015-171709.json`).
+  Template `evtest` (floor 1 / any group: 2 thugs per mob marker; any floor / any group: 1 stalker per boss marker);
+  group `gate1` = a mob marker in courtyard A holding the wood door (-2030, -1710); group `gate2` = a boss marker in
+  room H holding the metal door (-2030, -1695).
+  - Start: both doors shut and locked, 3 units spawned with their group tags, status 2/2 and 1/1 left.
+  - A held door forced open was shut again within a second (`door-reshut`).
+  - Thugs killed (`.devkill`): `gate1` cleared, its door unlocked and opened (screenshot: open, chat "Group 'gate1'
+    is defeated; its door opens"); `gate2` still held.
+  - Stalker killed: `gate2` cleared, its door opened, the event completed (77 s).
+  - Second run, stopped: 3 units removed, both doors put back as they were (open, unlocked).
+- **Restart mid-run:** run started with the wood door open, server restarted. First build: the doors weren't found at
+  boot (a default query saw zero Door entities with nobody online) and were dropped, leaving them locked; fixed with a
+  retry loop and then `IncludeDisabled` queries. Final build: released on the first try with nobody online, and the
+  door was back open and unlocked when Chaos arrived.
+- Regression: `unit-spawner` 23/23, `door-control` 15/15, `storey-contain` 24/24. `castle-contain` 29/31: the two
+  plot-edge checks failed because the owner has since fenced and hedged the courtyard's west edge, so the thugs had
+  no path to Chaos off the plot (they stayed Idle, no target). That test needs a new edge; the containment code
+  itself is unchanged.
+- Logs: no Uriel errors or warnings; server log has no exceptions.

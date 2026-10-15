@@ -41,6 +41,7 @@ public class Plugin : BasePlugin
     {
         CommandRegistry.UnregisterAssembly();
         Core.PublicStorage?.SaveSync();
+        Core.Events?.SaveSync();
         Harmony?.UnpatchSelf();
         return true;
     }

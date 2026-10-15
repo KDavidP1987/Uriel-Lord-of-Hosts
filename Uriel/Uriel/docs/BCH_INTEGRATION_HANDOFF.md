@@ -405,6 +405,33 @@ mix (`room,15`). The word appears back in the reply after `contained to:`. New c
 `[CastleEvents] ContainCheckSeconds` (float, default 1). A future spawn-point UI will want a containment picker
 with these same words.
 
+### 📋 Castle Events — event layouts, templates, runs (Phase 2 MVP, 2026-10-15, unreleased; no wire lines yet)
+
+New chat surface. Admins on any plot; castle owners on their own plot when `[CastleEvents] PlayerEvents` is on
+(default off). Every command needs `[CastleEvents] Enabled`. Human-text replies; no `[URIEL:*]` lines yet. This is
+the part meant for a Raphael UI (walk the castle, drop markers, bind doors, pick a template, start); wire lines come
+when Raphael asks for them. Design: `docs/features/CASTLE_EVENTS.md` › "Phase 2 MVP as built".
+
+| Command | Reply starts with |
+|---|---|
+| `.uriel event marker <group> [mob\|boss] [unit\|-] [count] [level] [contain\|-]` | `Marker #N (<slot>) in group '<g>' (floor F): …` / refusal |
+| `.uriel event door <group>` / `undoor <group>` | `Group '<g>' holds the door …` / `Group '<g>' no longer holds a door.` |
+| `.uriel event remove <#id\|group>` | `Removed marker #N.` / `Removed group '<g>' (N marker(s)).` (+ ` Refunded N item(s).`) |
+| `.uriel event list` | `Event layout of plot T: …`, then one line per group: `Floor F · <group> · <door> · #id slot unit xN, …` |
+| `.uriel event start [template]` | `Event started …: N unit(s) in G group(s), D door(s) held.` / refusal |
+| `.uriel event stop` | `Event stopped: removing N unit(s), D door(s) put back as they were.` |
+| `.uriel event status` | `Event running Xm Ys…: C/G group(s) cleared.`, then `<group>: N/M left, door held` or `cleared, door open` |
+| `.uriel template create <name>` | `Template '<name>' created (…).` |
+| `.uriel template set <name> <floor\|*> <group\|*> <mob\|boss> <unit[,unit…]> [count] [level]` | `Template '<name>': floor F, group G, <slot> = …` |
+| `.uriel template list` / `show <name>` / `delete <name>` | `Templates: …` / `Template '<name>' (…):` + lines / `Template '<name>' deleted.` |
+
+Players on the plot receive system messages: `A castle event has begun: …`, `Group '<g>' is defeated; its door
+opens.`, `The castle event is complete (Xm Ys).`, `The castle event was stopped.`
+
+New config keys, all `[CastleEvents]`: `PlayerEvents` (bool, false), `DefaultContain` (string, `storey`),
+`MaxMarkersPerPlot` (int, 40), `MarkerCostItem` (int GUID, 0 = free), `MarkerCostAmount` (int, 0),
+`BossMarkerCostAmount` (int, 0), `RunCostItem` (int GUID, 0 = free), `RunCostAmount` (int, 0).
+
 ## 7. Change discipline (the living-contract rule)
 
 Same rule as Beelzebub's handoff: **whenever Uriel work changes anything

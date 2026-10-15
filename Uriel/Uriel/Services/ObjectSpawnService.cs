@@ -1392,19 +1392,19 @@ internal sealed class ObjectSpawnService
 
     // ---- inventory cost helpers (charge the player's OWN inventory; castle shared-stash is a future enhancement) ----
 
-    static bool HasInventoryItems(Entity character, int itemGuid, int amount)
+    internal static bool HasInventoryItems(Entity character, int itemGuid, int amount)
     {
         if (!InventoryUtilities.TryGetInventoryEntity(Core.EntityManager, character, out Entity inv)) return false;
         return Core.ServerGameManager.GetInventoryItemCount(inv, new PrefabGUID(itemGuid)) >= amount;
     }
 
-    static bool ChargeInventory(Entity character, int itemGuid, int amount)
+    internal static bool ChargeInventory(Entity character, int itemGuid, int amount)
     {
         if (!InventoryUtilities.TryGetInventoryEntity(Core.EntityManager, character, out Entity inv)) return false;
         return Core.ServerGameManager.TryRemoveInventoryItem(inv, new PrefabGUID(itemGuid), amount);
     }
 
-    static void RefundInventory(Entity character, int itemGuid, int amount)
+    internal static void RefundInventory(Entity character, int itemGuid, int amount)
     {
         try { Core.ServerGameManager.TryAddInventoryItem(character, new PrefabGUID(itemGuid), amount); }
         catch (Exception ex) { Core.Log.LogWarning($"[Uriel SPAWN] refund failed: {ex.Message}"); }

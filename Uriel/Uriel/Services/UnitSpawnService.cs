@@ -87,6 +87,7 @@ internal sealed class UnitSpawnService
         public ulong By;
         public Containment Contain;
         public int Returns;
+        public string Tag;      // the castle event group it belongs to (null for a plain admin spawn)
     }
 
     sealed class Order
@@ -99,6 +100,7 @@ internal sealed class UnitSpawnService
         public ulong By;
         public int Level;
         public Containment Contain;
+        public string Tag;
     }
 
     const float StoreyBand = 2.5f;    // metres above or below the spawn height before a Storey unit is out
@@ -197,8 +199,8 @@ internal sealed class UnitSpawnService
                     continue;
                 }
                 long key = KeyOf(unit);
-                _ledger[key] = new Tracked { Unit = unit, Guid = o.Guid, Name = o.Name, Spot = o.Spot, Territory = o.Territory, Heart = o.Heart, By = o.By, Contain = o.Contain };
-                Core.Log.LogInfo($"[Uriel UNIT] spawned key={key} prefab={o.Name} {P(o.Spot)} hlevel={TileLayerUtility.GetHeightLevel(o.Spot.y)} territory={o.Territory} contain={o.Contain} room={RoomId(o.Contain.Room)} tracked={_ledger.Count} queued={_spawnQueue.Count}");
+                _ledger[key] = new Tracked { Unit = unit, Guid = o.Guid, Name = o.Name, Spot = o.Spot, Territory = o.Territory, Heart = o.Heart, By = o.By, Contain = o.Contain, Tag = o.Tag };
+                Core.Log.LogInfo($"[Uriel UNIT] spawned key={key} prefab={o.Name} {P(o.Spot)} hlevel={TileLayerUtility.GetHeightLevel(o.Spot.y)} territory={o.Territory} contain={o.Contain} room={RoomId(o.Contain.Room)} tag={o.Tag ?? "-"} tracked={_ledger.Count} queued={_spawnQueue.Count}");
             }
             catch (Exception ex)
             {
@@ -359,7 +361,14 @@ internal sealed class UnitSpawnService
         float3 spot = atAim && character.TryGetComponent<EntityAimData>(out var aim) && !aim.AimPosition.Equals(default(float3))
             ? aim.AimPosition
             : Forward(character, feet.Value, HereForward);
+        return EnqueueAt(spot, steamId, guid, name, count, level, contain, null, out message);
+    }
 
+    /// <summary>Queue <paramref name="count"/> units of a resolved prefab at <paramref name="spot"/> (several on a ring
+    /// around it), tagged with a castle event group. The same gates as a command spawn: a claimed, alive plot, a free
+    /// spot, a room under it for room containment, and the caps.</summary>
+    public bool EnqueueAt(float3 spot, ulong steamId, int guid, string name, int count, int level, Containment contain, string tag, out string message)
+    {
         if (!Core.ObjectSpawn.TryResolvePlot(spot, out Entity heart, out int territory))
         {
             message = "Units can only be spawned inside a castle plot.";
@@ -412,9 +421,9 @@ internal sealed class UnitSpawnService
                 float angle = i * 2.39996f; // golden angle: an even spread for any count
                 at = new float3(spot.x + math.cos(angle) * SpreadRadius, spot.y, spot.z + math.sin(angle) * SpreadRadius);
             }
-            _spawnQueue.Enqueue(new Order { Guid = guid, Name = name, Spot = at, Territory = territory, Heart = heart, By = steamId, Level = level, Contain = contain });
+            _spawnQueue.Enqueue(new Order { Guid = guid, Name = name, Spot = at, Territory = territory, Heart = heart, By = steamId, Level = level, Contain = contain, Tag = tag });
         }
-        Core.Log.LogInfo($"[Uriel UNIT] queued prefab={name} guid={guid} n={count} {P(spot)} hlevel={TileLayerUtility.GetHeightLevel(spot.y)} territory={territory} level={level} contain={contain} by={steamId}");
+        Core.Log.LogInfo($"[Uriel UNIT] queued prefab={name} guid={guid} n={count} {P(spot)} hlevel={TileLayerUtility.GetHeightLevel(spot.y)} territory={territory} level={level} contain={contain} tag={tag ?? "-"} by={steamId}");
         message = $"Queued {count} x {name}{clamped}, contained to: {contain}.";
         return true;
     }
@@ -436,7 +445,7 @@ internal sealed class UnitSpawnService
 
     /// <summary>A spawnable NPC: a CHAR_ prefab with Health, UnitLevel and AggroConsumer, not a player, not on the
     /// refused list, not one that drops into an inventory.</summary>
-    static bool TryResolveUnitPrefab(string arg, out int guid, out string name, out string message)
+    internal static bool TryResolveUnitPrefab(string arg, out int guid, out string name, out string message)
     {
         guid = 0; name = null; message = null;
         var map = Core.PrefabCollectionSystem.SpawnableNameToPrefabGuidDictionary;
@@ -487,6 +496,28 @@ internal sealed class UnitSpawnService
         if (!prefab.Has<Health>() || !prefab.Has<UnitLevel>() || !prefab.Has<AggroConsumer>()) return "not a fighting unit";
         if (prefab.Has<DropInInventoryOnSpawn>()) return "drops into an inventory on spawn";
         return null;
+    }
+
+    /// <summary>Units of an event group still alive or waiting to spawn.</summary>
+    public int CountTagged(string tag) =>
+        _ledger.Values.Count(t => t.Tag == tag) + _spawnQueue.Count(o => o.Tag == tag);
+
+    /// <summary>Plot room left under the caps (for an event start that needs all its units at once).</summary>
+    public int RoomOnPlot(int territory)
+    {
+        int onPlot = _ledger.Values.Count(t => t.Territory == territory) + _spawnQueue.Count(o => o.Territory == territory);
+        int plotRoom = Settings.CastleEvents_MaxUnitsPerPlot.Value - onPlot;
+        int serverRoom = Settings.CastleEvents_MaxTrackedUnits.Value - _ledger.Count - _spawnQueue.Count;
+        return Math.Min(plotRoom, serverRoom);
+    }
+
+    /// <summary>Remove every unit whose tag matches, and cancel its pending spawns. Returns the number removed.</summary>
+    public int DespawnTagged(Func<string, bool> match)
+    {
+        int n = 0;
+        foreach (var t in _ledger.Values.Where(t => t.Tag != null && match(t.Tag)).ToList()) { _despawnQueue.Enqueue(t.Unit); n++; }
+        n += DropQueued(o => o.Tag != null && match(o.Tag));
+        return n;
     }
 
     /// <summary>Queue the nearest tracked unit within <paramref name="radius"/> for removal.</summary>
@@ -590,7 +621,7 @@ internal sealed class UnitSpawnService
 
     /// <summary>"plot" (or empty), "room", "storey" (or "floor"), a leash radius in metres, or a comma mix such as
     /// "room,15". The plot is always enforced.</summary>
-    static bool TryParseContain(string arg, out Containment contain, out string message)
+    internal static bool TryParseContain(string arg, out Containment contain, out string message)
     {
         contain = new Containment(Contain.Plot, 0f, Entity.Null);
         message = null;

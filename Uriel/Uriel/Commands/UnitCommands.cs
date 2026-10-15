@@ -80,6 +80,28 @@ internal static class UnitCommands
         ctx.Reply(Core.Units.Rooms(ctx.Event.SenderCharacterEntity));
     }
 
+    [Command("door", description: "Spike 7: drive the nearest castle door of this plot within 6 m from the server: open, close, lock (players can't use it), unlock, or show. Usage: .uriel unit door <open|close|lock|unlock|show>", adminOnly: true)]
+    public static void Door(ChatCommandContext ctx, string action = "show")
+    {
+        if (!Ready(ctx)) return;
+        var character = ctx.Event.SenderCharacterEntity;
+        if (!character.TryGetComponent<Unity.Transforms.Translation>(out var me)) { ctx.Reply("Can't read your position."); return; }
+        if (!Core.ObjectSpawn.TryResolvePlot(me.Value, out var heart, out _)) { ctx.Reply("You're not standing in a castle plot."); return; }
+        var door = Services.CastleDoors.Nearest(heart, me.Value, 6f);
+        if (door == Unity.Entities.Entity.Null) { ctx.Reply("No castle door within 6 m."); return; }
+        bool ok = action.ToLowerInvariant() switch
+        {
+            "open" => Services.CastleDoors.SetOpen(door, true),
+            "close" => Services.CastleDoors.SetOpen(door, false),
+            "lock" => Services.CastleDoors.SetLocked(door, true),
+            "unlock" => Services.CastleDoors.SetLocked(door, false),
+            _ => true,
+        };
+        string state = Services.CastleDoors.Describe(door);
+        Core.Log.LogInfo($"[Uriel DOOR] action={action} ok={ok} {state}");
+        ctx.Reply($"door {action}: {(ok ? "ok" : "not supported")}; {state}");
+    }
+
     [Command("probe", description: "Read the tile map where you stand (or at your aim point): height level, and free/blocked and ground/air for nearby levels. Label it for the log. Usage: .uriel unit probe [label] [here|aim]", adminOnly: true)]
     public static void Probe(ChatCommandContext ctx, string label = "-", string where = "here")
     {

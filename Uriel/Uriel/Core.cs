@@ -29,6 +29,7 @@ internal static class Core
     public static ObjectConditionsService ObjectConditions { get; private set; }
     public static PlayerUnlockService PlayerUnlock { get; private set; }
     public static UnitSpawnService Units { get; private set; }
+    public static CastleEventService Events { get; private set; }
 
     public static ManualLogSource Log => Plugin.PluginLog;
     public static bool IsReady { get; private set; }
@@ -92,6 +93,11 @@ internal static class Core
             Units = new UnitSpawnService();
             try { Units.Start(); }
             catch (System.Exception ex) { Log.LogWarning($"[Uriel UNIT] start failed: {ex}"); }
+            // Castle-event layouts, templates and doors held by a run cut short by a restart.
+            Events = new CastleEventService();
+            Events.Load();
+            try { Events.Start(); }
+            catch (System.Exception ex) { Log.LogWarning($"[Uriel EVENT] start failed: {ex}"); }
             PublicStorage = new PublicStorageService();
             PublicStorage.Load();
             // Placement teams are restored from the game save; our share state lives only

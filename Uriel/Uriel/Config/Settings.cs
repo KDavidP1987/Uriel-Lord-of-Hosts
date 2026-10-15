@@ -55,6 +55,14 @@ internal static class Settings
     public static ConfigEntry<int> CastleEvents_UnitLifetimeSeconds { get; private set; }
     public static ConfigEntry<bool> CastleEvents_ClearDrops { get; private set; }
     public static ConfigEntry<float> CastleEvents_ContainCheckSeconds { get; private set; }
+    public static ConfigEntry<bool> CastleEvents_PlayerEvents { get; private set; }
+    public static ConfigEntry<string> CastleEvents_DefaultContain { get; private set; }
+    public static ConfigEntry<int> CastleEvents_MaxMarkersPerPlot { get; private set; }
+    public static ConfigEntry<int> CastleEvents_MarkerCostItem { get; private set; }
+    public static ConfigEntry<int> CastleEvents_MarkerCostAmount { get; private set; }
+    public static ConfigEntry<int> CastleEvents_BossMarkerCostAmount { get; private set; }
+    public static ConfigEntry<int> CastleEvents_RunCostItem { get; private set; }
+    public static ConfigEntry<int> CastleEvents_RunCostAmount { get; private set; }
 
     // ---- Diagnostics ----
     public static ConfigEntry<bool> VerboseLogging { get; private set; }
@@ -286,6 +294,40 @@ internal static class Settings
             "CastleEvents", "ContainCheckSeconds", 1f,
             "How often spawned units are checked against their containment (the castle plot always; a room, " +
             "storey or leash radius when the spawn asked for one). A unit outside is returned to its spawn spot.");
+
+        CastleEvents_PlayerEvents = config.Bind(
+            "CastleEvents", "PlayerEvents", false,
+            "Let castle owners (not only admins) set up and run castle events on their OWN plot: place spawn " +
+            "markers, bind doors, make templates, start and stop. Admins can always do it, on any plot.");
+
+        CastleEvents_DefaultContain = config.Bind(
+            "CastleEvents", "DefaultContain", "storey",
+            "Containment for an event marker that doesn't name one: plot, room, storey, a leash radius in metres, " +
+            "or a mix such as room,15. Units never leave the plot whatever this says.");
+
+        CastleEvents_MaxMarkersPerPlot = config.Bind(
+            "CastleEvents", "MaxMarkersPerPlot", 40,
+            "Most spawn markers one castle's event layout may have (admins are not limited).");
+
+        CastleEvents_MarkerCostItem = config.Bind(
+            "CastleEvents", "MarkerCostItem", 0,
+            "Item GUID a player pays to place a spawn marker (0 = free). Refunded when the marker is removed.");
+
+        CastleEvents_MarkerCostAmount = config.Bind(
+            "CastleEvents", "MarkerCostAmount", 0,
+            "How many of MarkerCostItem a mob marker costs.");
+
+        CastleEvents_BossMarkerCostAmount = config.Bind(
+            "CastleEvents", "BossMarkerCostAmount", 0,
+            "How many of MarkerCostItem a boss marker costs.");
+
+        CastleEvents_RunCostItem = config.Bind(
+            "CastleEvents", "RunCostItem", 0,
+            "Item GUID a player pays each time they start an event (0 = free). Not refunded.");
+
+        CastleEvents_RunCostAmount = config.Bind(
+            "CastleEvents", "RunCostAmount", 0,
+            "How many of RunCostItem one event start costs.");
 
         VerboseLogging = config.Bind(
             "Diagnostics", "VerboseLogging", false,

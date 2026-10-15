@@ -115,3 +115,8 @@ belongs here: things that bit once and must not bite twice.
   `EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag`
   via `EntityQueryBuilder` (KindredCommands does this everywhere — now we
   know why). Queries for *players interacting right now* can stay default.
+
+- **2026-10-15 (Castle Events) — castle doors and floors are Disabled too.** At boot with nobody online, a default
+  query found zero `Door` entities; with `IncludeDisabled | IncludeSpawnTag` it finds them, and a `Door.OpenState` /
+  `Interactable.Disabled` write on a disabled door holds (the client shows it once a player comes near).
+  `CastleDoors` and `CastleFloorIndex` query with those options.

@@ -74,6 +74,24 @@ internal static class CastleFloorIndex
         return best > float.NegativeInfinity;
     }
 
+    /// <summary>The storey a height is on, counted from 1: one more than the castle's floor levels (floor heights
+    /// within 2 m of each other are one level) more than 2 m below it. Natural ground under no floor reads 1.</summary>
+    public static int StoreyOf(Entity heart, float y)
+    {
+        var heights = new List<float>();
+        foreach (var f in All(heart)) heights.Add(f.Position.y);
+        heights.Sort();
+        int below = 0;
+        float last = float.NegativeInfinity;
+        foreach (var h in heights)
+        {
+            if (h >= y - 2f) break;
+            if (h - last > 2f) below++;
+            last = h;
+        }
+        return below + 1;
+    }
+
     /// <summary>The number of floor tiles cached for the castle (for the probe line).</summary>
     public static int FloorCount(Entity heart) => For(heart).Count;
 
@@ -88,15 +106,14 @@ internal static class CastleFloorIndex
     {
         if (_floors.TryGetValue(heart, out var cached) && (DateTime.UtcNow - cached.At).TotalSeconds <= RefreshSeconds) return cached;
         var index = new HeartFloors { At = DateTime.UtcNow };
-        var query = Core.EntityManager.CreateEntityQuery(new EntityQueryDesc
-        {
-            All = new[]
-            {
-                ComponentType.ReadOnly(Il2CppType.Of<CastleFloor>()),
-                ComponentType.ReadOnly(Il2CppType.Of<CastleHeartConnection>()),
-                ComponentType.ReadOnly(Il2CppType.Of<Translation>()),
-            },
-        });
+        // Include Disabled: floors far from every player are Disabled (DisableWhenNoPlayersInRange), and a cache built
+        // without them would miss the far side of the castle.
+        var builder = new EntityQueryBuilder(Allocator.Temp)
+            .AddAll(new(Il2CppType.Of<CastleFloor>(), ComponentType.AccessMode.ReadOnly))
+            .AddAll(new(Il2CppType.Of<CastleHeartConnection>(), ComponentType.AccessMode.ReadOnly))
+            .AddAll(new(Il2CppType.Of<Translation>(), ComponentType.AccessMode.ReadOnly))
+            .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
+        var query = Core.EntityManager.CreateEntityQuery(ref builder);
         try
         {
             var entities = query.ToEntityArray(Allocator.Temp);
