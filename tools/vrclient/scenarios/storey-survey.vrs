@@ -1,0 +1,20 @@
+# storey-survey.vrs: Castle Events containment, second storey. Reads the floor and room under the stairs mark and the
+# upstairs room mark, the plot's rooms per storey with every door and entrance, and the tile map upstairs.
+# Needs: CastleEvents.Enabled=true; marks uestairs and uec (the owner's .devmark on plot 11).
+ensure
+console TPHome
+wait 3
+mark
+chat .devgo uestairs
+wait 3
+chat .uriel unit probe stairs
+expect-log \[Uriel PROBE\] label=stairs .*castleFloors=\d+
+chat .devgo uec
+wait 3
+chat .uriel unit probe uec
+expect-log \[Uriel PROBE\] label=uec .*castleFloors=\d+
+chat .uriel unit rooms
+expect-log \[Uriel ROOMS\] end territory=\d+ rooms=\d+
+chat .uriel unit probemap uec 12
+expect-log \[Uriel PROBE\] map-end label=uec level=\d+ blocked=\d+
+shot full storey-survey-uec

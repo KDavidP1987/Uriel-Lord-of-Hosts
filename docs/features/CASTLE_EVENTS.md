@@ -78,11 +78,13 @@ One short test each, a greppable `[uriel …]` log line per reading, results rec
 
 1. Does the tile map see castle-built floors, walls, doors and stairs? (lessons §11.1; decides placement checks)
    **Answered (Session 2):** walls read blocked, castle floors read free with ground; and the game's own room data
-   (`CastleFloor` → `CastleRoomConnection.RoomEntity`) says which room every floor tile belongs to. Stairs untested.
+   (`CastleFloor` → `CastleRoomConnection.RoomEntity`) says which room every floor tile belongs to. A stairwell is
+   its own room on each storey (Session 3).
 2. Do units chase through an open doorway, around a corner, up a storey? Does a closed door hold them? (§11.2, §11.3)
-   **Partly answered (Session 2):** they follow through an open entrance; behind a closed door they never noticed
-   Chaos 12 m away. Up a storey untested (no second floor yet).
-3. Do units keep their storey in a fight? (§11.4)
+   **Answered (Sessions 2-3):** they follow through an open entrance and an open door, and up the stairs to the
+   next storey; behind a closed door they never noticed Chaos 12 m away.
+3. Do units keep their storey in a fight? **Answered (Session 3):** spawned upstairs they stayed at y 10 in
+   Combat; without containment they climb the stairs after a player; `storey` stops that.
 4. What do servants, defences and the heart do; does a unit hitting a structure count as raid damage? (§11.5)
 5. Do units in a castle with no players near stay alive and un-frozen? (§11.6)
 6. Do units die in sunlight through windows or open doors, and does that raise a `DeathEvent`? (§11.8)
@@ -270,6 +272,30 @@ plateau: a 30 m cliff to the south (y -25) and 5 m drops east and north (y 0); l
 - Logs: no Uriel errors or warnings; the server log has no exceptions. Other mods' start-up warnings only.
 - Tool fixes: `devserver.ps1` now minimizes the server's BepInEx console (it covered the main menu and vrclient's
   OCR couldn't find PLAY). One run lost the chat box for a few steps inside the castle (OCR); it didn't recur.
-- **Still open:** `storey` containment and units on stairs (needs a second floor); refusal on another player's castle
-  (needs a tester's castle and Phase 2's player path, since admins may spawn anywhere); sunlight, servants and raid
-  damage (spikes 4 and 6).
+- **Still open:** `storey` containment and units on stairs (needs a second floor; done in Session 3); refusal on
+  another player's castle (needs a tester's castle and Phase 2's player path, since admins may spawn anywhere);
+  sunlight, servants and raid damage (spikes 4 and 6).
+
+### Session 3 · 2026-10-15 · second storey, stairs, doors (Claude via vrclient, world nyardev, plot 11)
+
+The owner added a second storey (y 10): 247 floor tiles in 14 rooms over two storeys, 22 openings (closed and open
+wood doors upstairs, a closed door on the ground floor, an open iron gate). The stairwell (ground room x
+-2022.5..-2017.5, z -1702.5..-1697.5) is all stairs, from the small ground room east of it (y 5) to a top landing at
+(-2022.5, -1702.5), y 9.3, in the upstairs stairwell room; no door on the stairs. The upstairs and ground stairwells
+are separate rooms. On a stair, the floor lookup reads the ground stairwell up to y 8.5, the upstairs room above.
+
+- `storey-survey.vrs`: **PASS 5/5**. Upstairs floors read free but not grounded in the tile map (`' '`), the level
+  above them all blocked; upstairs walls are `#`.
+- `storey-contain.vrs`: **PASS 24/24** (results `%TEMP%\vrclient\results\storey-contain-20261015-160322.json`).
+  - **Upstairs spawn:** 2 thugs spawned at y 10.0 in the big upstairs room stayed at y 10.0, Combat on Chaos.
+  - **Control** (plot only): 2 thugs in the small ground room chased Chaos to the top landing and fought him there
+    (y 8.7 and 9.1).
+  - **`storey`:** the same move; both returned mid-stairs at y 7.8-7.9 (dy 2.8-2.9), then Idle at their spawn.
+  - **`room`:** the same move; both returned as they stepped onto the stairwell (y 6.3 and 7.3).
+  - **Upstairs `room` through an open door:** 2 thugs in the big upstairs room followed Chaos through the open door
+    (z -1695) into the corridor room; returned at z -1696.3 and -1698.0, y 10.0, then Idle.
+  - A first draft taught a test lesson: `.devtp x z 10` over a stairwell lands on the stair surface (y 6.5), not the
+    landing; probe heights first (`.uriel unit probe` after each `.devtp`).
+- Logs: no Uriel errors or warnings; server log has no exceptions.
+- **Still open:** refusal on another player's castle (tester + Phase 2 player path); sunlight, servants, raid damage
+  (spikes 4 and 6).

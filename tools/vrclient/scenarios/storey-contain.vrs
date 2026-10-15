@@ -1,0 +1,89 @@
+# storey-contain.vrs: Castle Events containment across storeys on plot 11 (owner's build, 2026-10-15). The stairwell
+# (ground room x -2022.5..-2017.5, z -1702.5..-1697.5) is all stairs, from the small ground room east of it (y 5) up to
+# the top landing (x -2022.5, z -1702.5, y 9.3) in the upstairs stairwell room; no door between. Thugs spawned in the
+# small ground room chase Chaos to the top landing: without containment they climb (one ends above y 8.5); with
+# `storey` they are returned once 2.5 m above their spawn; with `room` once they step onto the stairwell's floor.
+# Also: units spawned upstairs stay upstairs, and room containment holds upstairs through an open door.
+# Needs: CastleEvents.Enabled=true; Chaos vulnerable.
+ensure
+console TPHome
+wait 3
+mark
+# --- upstairs spawn: two thugs in the big upstairs room (mark uec, y 10) stay on that storey
+chat .devgo uec
+wait 3
+chat .uriel unit spawn CHAR_Bandit_Thug 2
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug x=\S+ y=10\.0 .*tracked=2
+wait 6
+chat .uriel unit status 30
+expect-log \[Uriel UNIT\] status key=\d+ prefab=CHAR_Bandit_Thug x=\S+ y=(9|10)\.\d
+expect-log \[Uriel UNIT\] status key=\d+ prefab=CHAR_Bandit_Thug x=\S+ y=(9|10)\.\d
+shot full storey-contain-upstairs
+chat .uriel unit clear
+expect-reply Removing 2 unit(s) on this plot
+wait 3
+# --- control: plot only; they follow Chaos up the stairs (a unit ends above y 8.5)
+chat .devtp -2014 -1705 5
+wait 3
+chat .uriel unit spawn CHAR_Bandit_Thug 2
+expect-reply contained to: plot
+wait 3
+mark
+chat .devtp -2022.5 -1702.5 10
+wait 12
+expect-no-log \[Uriel UNIT\] contain key= timeout=2
+chat .uriel unit status 30
+expect-log \[Uriel UNIT\] status key=\d+ prefab=CHAR_Bandit_Thug x=\S+ y=(8\.[5-9]|9\.\d|10\.\d)
+shot full storey-contain-control
+chat .uriel unit clear
+expect-reply Removing 2 unit(s) on this plot
+wait 3
+# --- storey: the same move; returned partway up the stairs
+chat .devtp -2014 -1705 5
+wait 3
+chat .uriel unit spawn CHAR_Bandit_Thug 2 0 here storey
+expect-reply contained to: storey
+wait 3
+chat .devtp -2022.5 -1702.5 10
+expect-log \[Uriel UNIT\] contain key=\d+ prefab=CHAR_Bandit_Thug reason=storey timeout=30
+wait 6
+chat .uriel unit status 30
+expect-log \[Uriel UNIT\] status key=\d+ prefab=CHAR_Bandit_Thug x=\S+ y=[5-7]\.\d
+expect-log \[Uriel UNIT\] status key=\d+ prefab=CHAR_Bandit_Thug x=\S+ y=[5-7]\.\d
+chat .uriel unit clear
+expect-reply Removing 2 unit(s) on this plot
+wait 3
+# --- room: the same move; returned when they stand over the upstairs room's floor
+chat .devtp -2014 -1705 5
+wait 3
+chat .uriel unit spawn CHAR_Bandit_Thug 2 0 here room
+expect-reply contained to: room
+wait 3
+chat .devtp -2022.5 -1702.5 10
+expect-log \[Uriel UNIT\] contain key=\d+ prefab=CHAR_Bandit_Thug reason=room timeout=30
+wait 6
+chat .uriel unit status 30
+expect-log \[Uriel UNIT\] status n=2
+chat .uriel unit clear
+expect-reply Removing 2 unit(s) on this plot
+wait 3
+# --- upstairs room through an OPEN door: two thugs in the big upstairs room (y 10), contained to it; Chaos steps
+# through the open door (x -2012.5, z -1695) into the corridor room south of it; they are returned on its floor
+chat .devtp -2012.5 -1687 10
+wait 3
+chat .uriel unit spawn CHAR_Bandit_Thug 2 0 here room
+expect-reply contained to: room
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug x=\S+ y=10\.0 .*contain=room room=\d+ .*tracked=2
+wait 3
+chat .devtp -2012.5 -1701 10
+expect-log \[Uriel UNIT\] contain key=\d+ prefab=CHAR_Bandit_Thug reason=room x=\S+ y=(9|10)\.\d timeout=30
+wait 6
+chat .uriel unit status 30
+expect-log \[Uriel UNIT\] status n=2
+shot full storey-contain-upstairs-room
+chat .uriel unit clear
+expect-reply Removing 2 unit(s) on this plot
+wait 3
+chat .uriel unit list
+expect-reply No Uriel units
+console TPHome
