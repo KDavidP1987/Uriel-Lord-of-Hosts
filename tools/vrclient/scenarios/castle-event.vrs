@@ -1,7 +1,8 @@
 # castle-event.vrs: Castle Events Phase 2 MVP. A template, two groups each holding a door, a manual start, doors that
 # open only when their group is defeated, completion, and a stop that removes the units and puts the doors back.
-# Plot 11, ground floor: group gate1 = 2 thugs (template mob, floor 1) in courtyard A holding the wood door at
-# (-2030, -1710); group gate2 = 1 stalker (template boss, any floor) in room H holding the metal door at (-2030, -1695).
+# Plot 11, ground floor: group gate1 = squad evthugs (2 thugs) in courtyard A holding the wood door at (-2030, -1710);
+# group gate2 = squad evboss (1 stalker, a boss) in room H holding the metal door at (-2030, -1695). Floor template
+# evfloor gives floor 1 those squads; template evtest gives floor 1 evfloor.
 # Needs: CastleEvents.Enabled=true; Chaos vulnerable; NyarDevTools (.devkill <guid> [radius]).
 ensure
 console TPHome
@@ -14,20 +15,38 @@ wait 2
 chat .uriel event stop
 chat .uriel event remove gate1
 chat .uriel event remove gate2
+# event-layers.vrs leaves g1-g4 holding the same doors (one group per door)
+chat .uriel event remove g1
+chat .uriel event remove g2
+chat .uriel event remove g3
+chat .uriel event remove g4
 chat .uriel template delete evtest
+chat .uriel floor delete evfloor
+chat .uriel squad delete evthugs
+chat .uriel squad delete evboss
 wait 2
-# --- template: floor 1, any group: 2 thugs per mob marker; any floor, any group: 1 stalker per boss marker
+# --- the layers: squads -> floor template -> template
+chat .uriel squad create evthugs
+expect-log \[Uriel EVENT\] squad-created name=evthugs owner=0
+chat .uriel squad add evthugs mob CHAR_Bandit_Thug 2
+expect-log \[Uriel EVENT\] squad-entry name=evthugs set=1 entry=1 role=mob units=CHAR_Bandit_Thug count=2 pick=any
+chat .uriel squad create evboss
+chat .uriel squad add evboss boss CHAR_Bandit_Stalker 1
+expect-log \[Uriel EVENT\] squad-entry name=evboss set=1 entry=1 role=boss units=CHAR_Bandit_Stalker count=1
+chat .uriel floor create evfloor
+chat .uriel floor assign evfloor gate1 evthugs
+expect-log \[Uriel EVENT\] floor-assign name=evfloor group=gate1 squads=evthugs
+chat .uriel floor assign evfloor gate2 evboss
+expect-log \[Uriel EVENT\] floor-assign name=evfloor group=gate2 squads=evboss
 chat .uriel template create evtest
 expect-log \[Uriel EVENT\] template-created name=evtest owner=0
-chat .uriel template set evtest 1 * mob CHAR_Bandit_Thug 2
-expect-log \[Uriel EVENT\] template-set name=evtest floor=1 group=\* slot=mob units=CHAR_Bandit_Thug count=2
-chat .uriel template set evtest * * boss CHAR_Bandit_Stalker 1
-expect-log \[Uriel EVENT\] template-set name=evtest floor=\* group=\* slot=boss units=CHAR_Bandit_Stalker count=1
+chat .uriel template floor evtest 1 evfloor
+expect-log \[Uriel EVENT\] template-floor name=evtest floor=1 plans=evfloor
 # --- layout: gate1 in the courtyard, gate2 in room H
 chat .devtp -2030 -1717 5
 wait 3
 chat .uriel event marker gate1 mob - 0 0 room
-expect-log \[Uriel EVENT\] marker-added territory=11 group=gate1 id=\d+ slot=mob floor=1 .*prefab=template
+expect-log \[Uriel EVENT\] marker-added territory=11 group=gate1 id=\d+ slot=mob floor=1 .*prefab=squad
 chat .devtp -2030 -1713 5
 wait 3
 chat .uriel event door gate1
@@ -35,24 +54,28 @@ expect-log \[Uriel EVENT\] door-bound territory=11 group=gate1 TM_Castle_Wall_Do
 chat .devtp -2030 -1702 5
 wait 3
 chat .uriel event marker gate2 boss - 0 0 room
-expect-log \[Uriel EVENT\] marker-added territory=11 group=gate2 id=\d+ slot=boss floor=1 .*prefab=template
-chat .devtp -2030 -1698 5
+expect-log \[Uriel EVENT\] marker-added territory=11 group=gate2 id=\d+ slot=boss floor=1 .*prefab=squad
+chat .devtp -2030 -1700 5
 wait 3
 chat .uriel event door gate2
 expect-log \[Uriel EVENT\] door-bound territory=11 group=gate2 \S+ x=-2030\.0 y=5\.0 z=-1695\.0
 chat .uriel event list
-expect-log \[Uriel EVENT\] layout territory=11 group=gate1 floor=1 door=-2030\.0,5\.0,-1710\.0 markers=1
-expect-log \[Uriel EVENT\] layout territory=11 group=gate2 floor=1 door=-2030\.0,5\.0,-1695\.0 markers=1
+expect-log \[Uriel EVENT\] layout territory=11 group=gate1 floor=1 door=-2030\.0,5\.0,-1710\.0 squad=- markers=1
+expect-log \[Uriel EVENT\] layout territory=11 group=gate2 floor=1 door=-2030\.0,5\.0,-1695\.0 squad=- markers=1
 # --- run 1: start from the small room east of the stairwell (out of both rooms' reach)
 chat .devtp -2014 -1705 5
 wait 3
 chat .uriel event start evtest
+expect-log \[Uriel EVENT\] floor-rolled floor=1 template=evfloor of=1
 expect-log \[Uriel EVENT\] door-held territory=11 group=gate1 .* open=False locked=True
+expect-log \[Uriel EVENT\] group-rolled territory=11 group=gate1 floor=1 squad=evthugs units=2 bosses=0 spawns=CHAR_Bandit_Thugx2
 expect-log \[Uriel EVENT\] door-held territory=11 group=gate2 .* open=False locked=True
-expect-log \[Uriel EVENT\] started territory=11 template=evtest groups=2 units=3 doors=2 failedMarkers=0
+expect-log \[Uriel EVENT\] group-rolled territory=11 group=gate2 floor=1 squad=evboss units=1 bosses=1 spawns=CHAR_Bandit_Stalkerx1
+expect-log \[Uriel EVENT\] started territory=11 template=evtest groups=2 units=3 bosses=1 doors=2 failedMarkers=0
 expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug .*tag=ev11:gate1
 expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug .*tag=ev11:gate1
-expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Stalker .*tag=ev11:gate2
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Stalker .*tag=ev11:gate2 boss=1
+expect-log \[Uriel EVENT\] clock-started territory=11 units=3 bosses=1
 wait 3
 chat .uriel event status
 expect-log \[Uriel EVENT\] status territory=11 group=gate1 left=2 spawned=2 cleared=False door=held
@@ -88,8 +111,9 @@ wait 2
 chat .devkill -309264723 30
 expect-log \[DEV KILL\] n=1 prefab=-309264723
 expect-log \[Uriel EVENT\] group-cleared territory=11 group=gate2 units=1 door=opened
-expect-log \[Uriel EVENT\] complete territory=11 groups=2 seconds=\d+
-chat .devtp -2030 -1698 5
+expect-log \[Uriel EVENT\] bosses-defeated territory=11 bosses=1 seconds=\d+
+expect-log \[Uriel EVENT\] complete territory=11 groups=2 seconds=\S+ bossSeconds=\d
+chat .devtp -2030 -1700 5
 wait 2
 chat .uriel unit door show
 expect-log \[Uriel DOOR\] action=show ok=True .*z=-1695\.0 open=True locked=False
@@ -98,10 +122,13 @@ shot full gate2-open
 chat .devtp -2014 -1705 5
 wait 3
 chat .uriel event start evtest
-expect-log \[Uriel EVENT\] started territory=11 template=evtest groups=2 units=3 doors=2 failedMarkers=0
+expect-log \[Uriel EVENT\] started territory=11 template=evtest groups=2 units=3 bosses=1 doors=2 failedMarkers=0
 wait 4
 chat .uriel event stop
 expect-log \[Uriel EVENT\] stopped territory=11 units=3 doorsRestored=2
+chat .uriel event history
+expect-log \[Uriel EVENT\] history territory=11 template=evtest result=stopped
+expect-log \[Uriel EVENT\] history territory=11 template=evtest result=complete seconds=\S+ bossSeconds=\d
 wait 4
 chat .uriel unit list
 chat .devtp -2030 -1713 5

@@ -418,15 +418,43 @@ when Raphael asks for them. Design: `docs/features/CASTLE_EVENTS.md` › "Phase 
 | `.uriel event door <group>` / `undoor <group>` | `Group '<g>' holds the door …` / `Group '<g>' no longer holds a door.` |
 | `.uriel event remove <#id\|group>` | `Removed marker #N.` / `Removed group '<g>' (N marker(s)).` (+ ` Refunded N item(s).`) |
 | `.uriel event list` | `Event layout of plot T: …`, then one line per group: `Floor F · <group> · <door> · #id slot unit xN, …` |
-| `.uriel event start [template]` | `Event started …: N unit(s) in G group(s), D door(s) held.` / refusal |
+| `.uriel event squad <group> <squad\|->` | the group's own squad (used when the run's template doesn't cover it) |
+| `.uriel event start [template\|floor template\|squad\|-] [options]` | `Event started from '<t>': N unit(s), B boss(es), G group(s), D door(s) held[, scaled <scale>][, limit Xm Ys].` / refusal |
 | `.uriel event stop` | `Event stopped: removing N unit(s), D door(s) put back as they were.` |
-| `.uriel event status` | `Event running Xm Ys…: C/G group(s) cleared.`, then `<group>: N/M left, door held` or `cleared, door open` |
-| `.uriel template create <name>` | `Template '<name>' created (…).` |
-| `.uriel template set <name> <floor\|*> <group\|*> <mob\|boss> <unit[,unit…]> [count] [level]` | `Template '<name>': floor F, group G, <slot> = …` |
-| `.uriel template list` / `show <name>` / `delete <name>` | `Templates: …` / `Template '<name>' (…):` + lines / `Template '<name>' deleted.` |
+| `.uriel event status` | `Event running Xm Ys, '<t>' [<options>]: C/G group(s) cleared, bosses L/B left, Xm Ys left.`, then `<group> (<squad>): N/M left, door held` or `cleared, door open` |
+| `.uriel event history` | `Last runs on plot T (N recorded):`, then `MM-dd HH:mm · <t> [<options>] · <result> Xm Ys · bosses Xm Ys · N units`, then `Best '<t>': complete …, bosses … (N run(s)).` |
 
-Players on the plot receive system messages: `A castle event has begun: …`, `Group '<g>' is defeated; its door
-opens.`, `The castle event is complete (Xm Ys).`, `The castle event was stopped.`
+**Layers (2026-10-15, replaces `template set`):** a **squad** is what one group spawns: one or more *sets*
+(combinations, one rolled per run by weight), each a list of *entries* `<mob|boss> <units> <count> <any|distinct>
+[level]` (`any` = an assortment with repeats, `distinct` = that many different ones, e.g. 1 of 3 bosses). A **floor
+template** maps layout groups (or `*`) to squads (several = one rolled per run). A **template** maps floors (`1`, `2`,
+… or `*`) to floor templates (several = a per-floor theme rolled per run) and may carry default run options. Names are
+one namespace (1-24 letters, digits, `-`, `_`); an admin's are server-wide, a player's are their own.
+
+| Command | Reply starts with |
+|---|---|
+| `.uriel squad create <name>` / `delete <name>` | `The squad '<name>' is created (server-wide…\|yours).` / `The squad '<name>' is deleted.` |
+| `.uriel squad add <name> <mob\|boss> <unit[,unit…]> [count] [any\|distinct] [level] [set]` | `Squad '<name>', set S, entry E: …` |
+| `.uriel squad extend <name> <set> <entry> <unit[,unit…]>` | `Squad '<name>', set S, entry E: …` (a chat line is ~120 characters; long unit lists go in parts) |
+| `.uriel squad remove <name> <set> [entry]` / `weight <name> <set> <1-100>` | `Squad '<name>': set S [entry E] removed.` / `Squad '<name>': set S weight W (of T).` |
+| `.uriel floor create\|delete <name>`, `floor assign <name> <group\|*> <squad[,squad…]\|->` | `Floor template '<name>': group G gets A or B (one rolled per run).` |
+| `.uriel template create\|delete <name>`, `template floor <name> <floor\|*> <floor-template[,…]\|->` | `Template '<name>': floor F uses A or B (one rolled per floor per run).` |
+| `.uriel template options <name> <options\|->` | the template's default run options |
+| `.uriel squad\|floor\|template list` / `show <name>` | the ones the caller can use / the contents |
+
+**Run options** (one comma-separated word; the template's defaults first, the start's add to or override them):
+`easy|normal|hard|brutal`, `level=N`, `level+N`/`level-N`, `auto` / `auto+N` (the highest player level on the plot,
+plus N), `hp*X`, `dmg*X` (= `pp*X` + `sp*X`), `speed*X`, `aspd*X` (0.1-10; `=` and `x` work as `*`), `limit=15m|90s|1h`
+(max 6 h; 0 = none), `faction=keep` / `mixed` (each unit keeps its own faction; the default puts the whole run on the
+first boss's faction so mixed units don't fight each other), `faction=one` / `allied`. Unit names accept a unique short form: `Foreman_VBlood` = `CHAR_Bandit_Foreman_VBlood`.
+
+`.uriel unit kill [radius] [all|boss|mob]` (admin): kills Uriel's own units nearby (testing); reply `Killed N Uriel
+unit(s) within R m.`
+
+Players on the plot receive system messages: `A castle event has begun: …`, `All N foes are in place. The clock is
+running[: Xm Ys].`, `Group '<g>' is defeated; its door opens (Xm Ys).`, `All N bosses are defeated: Xm Ys.`,
+`The castle event is complete: Xm Ys.`, `10 seconds left.`, `Time is up: the castle event has failed.`,
+`The castle event was stopped.`
 
 New config keys, all `[CastleEvents]`: `PlayerEvents` (bool, false), `DefaultContain` (string, `storey`),
 `MaxMarkersPerPlot` (int, 40), `MarkerCostItem` (int GUID, 0 = free), `MarkerCostAmount` (int, 0),

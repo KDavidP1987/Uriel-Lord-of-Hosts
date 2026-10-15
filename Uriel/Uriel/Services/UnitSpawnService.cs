@@ -88,6 +88,7 @@ internal sealed class UnitSpawnService
         public Containment Contain;
         public int Returns;
         public string Tag;      // the castle event group it belongs to (null for a plain admin spawn)
+        public bool Boss;       // an event boss (the run's boss clock waits for these)
     }
 
     sealed class Order
@@ -101,6 +102,9 @@ internal sealed class UnitSpawnService
         public int Level;
         public Containment Contain;
         public string Tag;
+        public bool Boss;
+        public UnitScaling Scale;   // null = none
+        public int FactionFrom;     // a unit prefab whose faction and team this unit takes (0 = its own)
     }
 
     const float StoreyBand = 2.5f;    // metres above or below the spawn height before a Storey unit is out
@@ -199,8 +203,8 @@ internal sealed class UnitSpawnService
                     continue;
                 }
                 long key = KeyOf(unit);
-                _ledger[key] = new Tracked { Unit = unit, Guid = o.Guid, Name = o.Name, Spot = o.Spot, Territory = o.Territory, Heart = o.Heart, By = o.By, Contain = o.Contain, Tag = o.Tag };
-                Core.Log.LogInfo($"[Uriel UNIT] spawned key={key} prefab={o.Name} {P(o.Spot)} hlevel={TileLayerUtility.GetHeightLevel(o.Spot.y)} territory={o.Territory} contain={o.Contain} room={RoomId(o.Contain.Room)} tag={o.Tag ?? "-"} tracked={_ledger.Count} queued={_spawnQueue.Count}");
+                _ledger[key] = new Tracked { Unit = unit, Guid = o.Guid, Name = o.Name, Spot = o.Spot, Territory = o.Territory, Heart = o.Heart, By = o.By, Contain = o.Contain, Tag = o.Tag, Boss = o.Boss };
+                Core.Log.LogInfo($"[Uriel UNIT] spawned key={key} prefab={o.Name} {P(o.Spot)} hlevel={TileLayerUtility.GetHeightLevel(o.Spot.y)} territory={o.Territory} contain={o.Contain} room={RoomId(o.Contain.Room)} tag={o.Tag ?? "-"}{(o.Boss ? " boss=1" : "")}{(o.Scale is { IsNone: false } ? $" scale={o.Scale} level={Level(unit)}" : "")}{(o.FactionFrom != 0 ? $" faction={FactionOf(unit)}" : "")} tracked={_ledger.Count} queued={_spawnQueue.Count}");
             }
             catch (Exception ex)
             {
@@ -220,7 +224,7 @@ internal sealed class UnitSpawnService
         try
         {
             // Marker first (the sweep's record), and the LifeTime backstop even when marking failed.
-            bool marked = TryMark(unit, out string markError);
+            bool marked = TryMark(unit, o.Scale, out string markError);
             bool timed = TryTime(unit, Settings.CastleEvents_UnitLifetimeSeconds.Value, out string timeError);
             if (!marked || !timed)
             {
@@ -253,10 +257,16 @@ internal sealed class UnitSpawnService
                 home.Position = o.Spot;
                 unit.Write(home);
             }
-            if (o.Level > 0 && unit.TryGetComponent<UnitLevel>(out var lvl))
+            if (o.FactionFrom != 0 && o.FactionFrom != o.Guid) TakeFaction(unit, o.FactionFrom);
+            if (unit.TryGetComponent<UnitLevel>(out var lvl))
             {
-                lvl.Level._Value = o.Level;
-                unit.Write(lvl);
+                int level = o.Level > 0 ? o.Level : lvl.Level._Value;
+                if (o.Scale != null && o.Scale.LevelFor(level) is int scaled && scaled > 0) level = scaled;
+                if (level > 0 && level != lvl.Level._Value)
+                {
+                    lvl.Level._Value = level;
+                    unit.Write(lvl);
+                }
             }
             return unit;
         }
@@ -284,7 +294,21 @@ internal sealed class UnitSpawnService
         }
     }
 
-    static bool TryMark(Entity unit, out string error)
+    static int Level(Entity unit) => unit.TryGetComponent<UnitLevel>(out var l) ? l.Level._Value : 0;
+
+    /// <summary>Give a unit another unit prefab's faction (FactionReference) and team, so a mixed event is one side.</summary>
+    static void TakeFaction(Entity unit, int fromGuid)
+    {
+        if (!Core.PrefabCollectionSystem._PrefabLookupMap.GuidToEntityMap.TryGetValue(new PrefabGUID(fromGuid), out Entity from) || !from.Exists()) return;
+        if (from.TryGetComponent<FactionReference>(out var faction) && unit.Has<FactionReference>()) unit.Write(faction);
+        if (from.TryGetComponent<Team>(out var team) && unit.Has<Team>()) unit.Write(team);
+    }
+
+    static string FactionOf(Entity unit) =>
+        (unit.TryGetComponent<FactionReference>(out var f) ? f.FactionGuid._Value.GetPrefabName() : "-") +
+        (unit.TryGetComponent<Team>(out var t) ? $"/team={t.Value}:{t.FactionIndex}" : "");
+
+    static bool TryMark(Entity unit, UnitScaling scale, out string error)
     {
         error = null;
         try
@@ -302,6 +326,8 @@ internal sealed class UnitSpawnService
             buff.RemoveIfPresent<DestroyOnGameplayEvent>();
             // The potion's own stat bonus goes: the marker must change nothing about the unit.
             if (buff.Has<ModifyUnitStatBuff_DOTS>()) Core.EntityManager.GetBuffer<ModifyUnitStatBuff_DOTS>(buff).Clear();
+            // ...unless a run scales it: then the marker carries the run's multipliers, and they die with the unit.
+            scale?.WriteModifiers(buff);
             if (buff.Has<LifeTime>()) buff.Write(new LifeTime { Duration = 0f, EndAction = LifeTimeEndAction.None });
             return true;
         }
@@ -367,7 +393,8 @@ internal sealed class UnitSpawnService
     /// <summary>Queue <paramref name="count"/> units of a resolved prefab at <paramref name="spot"/> (several on a ring
     /// around it), tagged with a castle event group. The same gates as a command spawn: a claimed, alive plot, a free
     /// spot, a room under it for room containment, and the caps.</summary>
-    public bool EnqueueAt(float3 spot, ulong steamId, int guid, string name, int count, int level, Containment contain, string tag, out string message)
+    public bool EnqueueAt(float3 spot, ulong steamId, int guid, string name, int count, int level, Containment contain, string tag, out string message,
+        bool boss = false, UnitScaling scale = null, int ringOffset = 0, int factionFrom = 0)
     {
         if (!Core.ObjectSpawn.TryResolvePlot(spot, out Entity heart, out int territory))
         {
@@ -397,7 +424,8 @@ internal sealed class UnitSpawnService
             contain = contain with { Room = floor.Room };
         }
 
-        int max = Math.Max(1, Settings.CastleEvents_MaxUnitsPerCommand.Value);
+        // An event run checked its whole size against the caps before queueing anything; only a command is per-call capped.
+        int max = tag != null ? int.MaxValue : Math.Max(1, Settings.CastleEvents_MaxUnitsPerCommand.Value);
         string clamped = count > max ? $" (clamped from {count} by MaxUnitsPerCommand)" : "";
         count = Math.Clamp(count, 1, max);
 
@@ -416,14 +444,16 @@ internal sealed class UnitSpawnService
         for (int i = 0; i < count; i++)
         {
             float3 at = spot;
-            if (i > 0)
+            int ring = i + ringOffset;  // several prefabs at one marker continue the same ring
+            if (ring > 0)
             {
-                float angle = i * 2.39996f; // golden angle: an even spread for any count
-                at = new float3(spot.x + math.cos(angle) * SpreadRadius, spot.y, spot.z + math.sin(angle) * SpreadRadius);
+                float angle = ring * 2.39996f; // golden angle: an even spread for any count
+                float r = SpreadRadius * (1f + ring / 8 * 0.8f); // bigger groups: wider rings
+                at = new float3(spot.x + math.cos(angle) * r, spot.y, spot.z + math.sin(angle) * r);
             }
-            _spawnQueue.Enqueue(new Order { Guid = guid, Name = name, Spot = at, Territory = territory, Heart = heart, By = steamId, Level = level, Contain = contain, Tag = tag });
+            _spawnQueue.Enqueue(new Order { Guid = guid, Name = name, Spot = at, Territory = territory, Heart = heart, By = steamId, Level = level, Contain = contain, Tag = tag, Boss = boss, Scale = scale, FactionFrom = factionFrom });
         }
-        Core.Log.LogInfo($"[Uriel UNIT] queued prefab={name} guid={guid} n={count} {P(spot)} hlevel={TileLayerUtility.GetHeightLevel(spot.y)} territory={territory} level={level} contain={contain} tag={tag ?? "-"} by={steamId}");
+        Core.Log.LogInfo($"[Uriel UNIT] queued prefab={name} guid={guid} n={count} {P(spot)} hlevel={TileLayerUtility.GetHeightLevel(spot.y)} territory={territory} level={level} contain={contain} tag={tag ?? "-"}{(boss ? " boss=1" : "")}{(scale is { IsNone: false } ? $" scale={scale}" : "")} by={steamId}");
         message = $"Queued {count} x {name}{clamped}, contained to: {contain}.";
         return true;
     }
@@ -463,7 +493,29 @@ internal sealed class UnitSpawnService
                 if (kv.Key.StartsWith("CHAR_", StringComparison.Ordinal) && kv.Key.IndexOf(arg, StringComparison.OrdinalIgnoreCase) >= 0)
                     matches.Add((kv.Key, kv.Value.GuidHash));
             }
+            // Some units (CHAR_Undead_SkeletonSoldier_Base, ..._SkeletonCrossbow_Base) aren't in the spawnable-name
+            // list at all: fall back to every prefab's name.
+            if (matches.Count == 0)
+            {
+                var lookup = Core.PrefabCollectionSystem._PrefabLookupMap;
+                var keys = lookup.GuidToEntityMap.GetKeyArray(Unity.Collections.Allocator.Temp);
+                try
+                {
+                    foreach (var key in keys)
+                    {
+                        string n = lookup.GetName(key);
+                        if (n == null || !n.StartsWith("CHAR_", StringComparison.Ordinal)) continue;
+                        if (string.Equals(n, arg, StringComparison.OrdinalIgnoreCase)) { matches.Clear(); matches.Add((n, key.GuidHash)); break; }
+                        if (n.IndexOf(arg, StringComparison.OrdinalIgnoreCase) >= 0) matches.Add((n, key.GuidHash));
+                    }
+                }
+                finally { keys.Dispose(); }
+            }
             if (matches.Count == 0) { message = $"No unit prefab matches '{arg}'."; return false; }
+            // A short name (chat lines are short): one match that ends with it wins, so "Foreman_VBlood" is
+            // CHAR_Bandit_Foreman_VBlood, not also its _GateBoss_Minor variant.
+            if (matches.Count > 1 && matches.Count(m => m.Name.EndsWith(arg, StringComparison.OrdinalIgnoreCase)) == 1)
+                matches = matches.Where(m => m.Name.EndsWith(arg, StringComparison.OrdinalIgnoreCase)).ToList();
             if (matches.Count > 1)
             {
                 message = $"'{arg}' matches {matches.Count} units: {string.Join(", ", matches.Take(5).Select(m => m.Name))}{(matches.Count > 5 ? ", ..." : "")}";
@@ -502,6 +554,15 @@ internal sealed class UnitSpawnService
     public int CountTagged(string tag) =>
         _ledger.Values.Count(t => t.Tag == tag) + _spawnQueue.Count(o => o.Tag == tag);
 
+    /// <summary>Units whose tag starts with <paramref name="prefix"/> (a whole run): alive and queued, or only queued,
+    /// optionally bosses only.</summary>
+    public int CountTaggedPrefix(string prefix, bool bossOnly = false, bool queuedOnly = false)
+    {
+        bool Match(string tag, bool boss) => tag != null && tag.StartsWith(prefix, StringComparison.Ordinal) && (!bossOnly || boss);
+        int queued = _spawnQueue.Count(o => Match(o.Tag, o.Boss));
+        return queuedOnly ? queued : queued + _ledger.Values.Count(t => Match(t.Tag, t.Boss));
+    }
+
     /// <summary>Plot room left under the caps (for an event start that needs all its units at once).</summary>
     public int RoomOnPlot(int territory)
     {
@@ -536,6 +597,26 @@ internal sealed class UnitSpawnService
         _despawnQueue.Enqueue(best.Unit);
         Core.Log.LogInfo($"[Uriel UNIT] despawn-queued key={KeyOf(best.Unit)} prefab={best.Name} d={F(bestD)}");
         return $"Removing {best.Name} ({F(bestD)} m).";
+    }
+
+    /// <summary>Kill (a real death, credited to the caller) every tracked unit within <paramref name="radius"/>: all,
+    /// only bosses, or only mobs. Only Uriel's own units are touched.</summary>
+    public string KillNear(Entity character, float radius, string which)
+    {
+        if (!character.TryGetComponent<Translation>(out var me)) return "Can't read your position.";
+        which = (which ?? "all").ToLowerInvariant();
+        if (which != "all" && which != "boss" && which != "mob") return "Kill all, boss or mob.";
+        int n = 0;
+        foreach (var t in _ledger.Values.ToList())
+        {
+            if ((which == "boss" && !t.Boss) || (which == "mob" && t.Boss)) continue;
+            if (!t.Unit.Exists() || !t.Unit.TryGetComponent<Translation>(out var at) || math.distance(at.Value, me.Value) > radius) continue;
+            if (t.Unit.TryGetComponent<Health>(out var hp) && hp.IsDead) continue;
+            StatChangeUtility.KillEntity(Core.EntityManager, t.Unit, character, 0.0, StatChangeReason.Default, true);
+            n++;
+        }
+        Core.Log.LogInfo($"[Uriel UNIT] killed n={n} which={which} radius={F(radius)}");
+        return $"Killed {n} Uriel unit(s) within {F(radius)} m.";
     }
 
     /// <summary>Queue every tracked unit on the plot the caller stands in.</summary>
@@ -611,7 +692,10 @@ internal sealed class UnitSpawnService
                 if (te != Entity.Null) targeting++;
             }
             string lvl = t.Unit.TryGetComponent<UnitLevel>(out var ul) ? ul.Level._Value.ToString(CultureInfo.InvariantCulture) : "-";
-            Core.Log.LogInfo($"[Uriel UNIT] status key={key} prefab={t.Name} {P(at.Value)} hlevel={hl} level={lvl} hp={hp} state={state} target={target} d={F(d)} fromSpawn={F(math.distance(at.Value, t.Spot))} spawnY={F(t.Spot.y)} contain={t.Contain} returns={t.Returns}");
+            string stats = t.Unit.TryGetComponent<UnitStats>(out var us) ? $"pp={F(us.PhysicalPower._Value)} sp={F(us.SpellPower._Value)}" : "pp=- sp=-";
+            string mspd = t.Unit.TryGetComponent<Movement>(out var mv) ? F(mv.Speed._Value) : "-";
+            string aspd = t.Unit.TryGetComponent<AbilityBar_Shared>(out var bar) ? F(bar.PrimaryAttackSpeed._Value) : "-";
+            Core.Log.LogInfo($"[Uriel UNIT] status key={key} prefab={t.Name} {P(at.Value)} hlevel={hl} level={lvl} hp={hp} {stats} mspd={mspd} aspd={aspd} state={state} target={target} d={F(d)} fromSpawn={F(math.distance(at.Value, t.Spot))} spawnY={F(t.Spot.y)} contain={t.Contain} returns={t.Returns}");
         }
         Core.Log.LogInfo($"[Uriel UNIT] status n={n} targeting={targeting} radius={F(radius)}");
         return $"{n} unit(s) within {F(radius)} m, {targeting} with a target (details in the server log).";

@@ -1,0 +1,140 @@
+# event-layers.vrs: Castle Events layers and RNG, the owner's example (2026-10-15):
+#   group 1, floor 1: 5 militia (an assortment of guards and light militia)       squad militia5
+#   group 2, floor 1: 1 boss, one of these 3                                     squad boss1of3
+#   group 3, floor 2: 10 skeletons, one of two combinations (10 soldiers, or 6 + 4 crossbows)   squad skel10
+#   group 4, floor 2: 2 bosses, 2 different ones of these 10                      squad bosses2
+#   floor template f1 = g1 militia5 + g2 boss1of3; f2 = g3 skel10 + g4 bosses2; template castle1 = floor 1 f1, floor 2 f2.
+# Doors: g1 the ground wood door (-2030, -1710), g2 the ground metal door (-2030, -1695), g3 the upstairs door at
+# (-2012.5, -1695). The clock runs from the moment all 18 are in place; the last boss down and the completion are timed.
+# One faction per run (the default): the first boss's. Without it the floor-2 wolf V Blood killed a skeleton.
+# Needs: CastleEvents.Enabled=true; Chaos vulnerable. Kills use '.uriel unit kill' (only Uriel's own units).
+ensure
+console TPHome
+wait 3
+mark
+chat .devtp -2014 -1705 5
+wait 3
+chat .uriel event stop
+chat .uriel unit clear
+chat .uriel event remove gate1
+chat .uriel event remove gate2
+chat .uriel event remove g1
+chat .uriel event remove g2
+chat .uriel event remove g3
+chat .uriel event remove g4
+chat .uriel template delete castle1
+chat .uriel floor delete f1
+chat .uriel floor delete f2
+chat .uriel squad delete militia5
+chat .uriel squad delete boss1of3
+chat .uriel squad delete skel10
+chat .uriel squad delete bosses2
+wait 3
+# --- squads
+chat .uriel squad create militia5
+chat .uriel squad add militia5 mob CHAR_Militia_Guard,CHAR_Militia_Light 5 any
+expect-log \[Uriel EVENT\] squad-entry name=militia5 set=1 entry=1 role=mob units=CHAR_Militia_Guard/CHAR_Militia_Light count=5 pick=any
+chat .uriel squad create boss1of3
+chat .uriel squad add boss1of3 boss Foreman_VBlood,StoneBreaker_VBlood,Stalker_VBlood 1 distinct
+expect-log \[Uriel EVENT\] squad-entry name=boss1of3 set=1 entry=1 role=boss .*count=1 pick=distinct
+chat .uriel squad create skel10
+# (by GUID and by name: the skeletons are not in the game's spawnable-name list; Uriel falls back to all prefab names)
+chat .uriel squad add skel10 mob -603934060 10
+chat .uriel squad add skel10 mob SkeletonSoldier_Base 6 any 0 2
+chat .uriel squad add skel10 mob SkeletonCrossbow_Base 4 any 0 2
+expect-log \[Uriel EVENT\] squad-entry name=skel10 set=2 entry=2 role=mob units=CHAR_Undead_SkeletonCrossbow_Base count=4
+chat .uriel squad show skel10
+expect-reply set 2 (1/2): [1] 6 mobs
+chat .uriel squad create bosses2
+# ten bosses: a chat line is short, so the list is added in parts ('squad extend')
+chat .uriel squad add bosses2 boss Foreman_VBlood,StoneBreaker_VBlood,Stalker_VBlood 2 distinct
+expect-log \[Uriel EVENT\] squad-entry name=bosses2 set=1 entry=1 role=boss .*count=2 pick=distinct
+chat .uriel squad extend bosses2 1 1 Chaosarrow_VBlood,Frostarrow_VBlood,Forest_Wolf_VBlood
+chat .uriel squad extend bosses2 1 1 Militia_Guard_VBlood,Bomber_VBlood,Fisherman_VBlood
+chat .uriel squad extend bosses2 1 1 Tourok_VBlood
+expect-log \[Uriel EVENT\] squad-extend name=bosses2 set=1 entry=1 units=10
+# --- floor templates and the castle template
+chat .uriel floor create f1
+chat .uriel floor assign f1 g1 militia5
+chat .uriel floor assign f1 g2 boss1of3
+chat .uriel floor create f2
+chat .uriel floor assign f2 g3 skel10
+chat .uriel floor assign f2 g4 bosses2
+expect-log \[Uriel EVENT\] floor-assign name=f2 group=g4 squads=bosses2
+chat .uriel template create castle1
+chat .uriel template floor castle1 1 f1
+chat .uriel template floor castle1 2 f2
+expect-log \[Uriel EVENT\] template-floor name=castle1 floor=2 plans=f2
+# --- the layout: g1, g2 on the ground floor; g3, g4 upstairs
+chat .devtp -2030 -1717 5
+wait 3
+chat .uriel event marker g1 mob - 0 0 room
+expect-log \[Uriel EVENT\] marker-added territory=11 group=g1 id=\d+ slot=mob floor=1
+chat .devtp -2030 -1713 5
+wait 3
+chat .uriel event door g1
+expect-log \[Uriel EVENT\] door-bound territory=11 group=g1 \S+ x=-2030\.0 y=5\.0 z=-1710\.0
+chat .devtp -2030 -1702 5
+wait 3
+chat .uriel event marker g2 boss - 0 0 room
+expect-log \[Uriel EVENT\] marker-added territory=11 group=g2 id=\d+ slot=boss floor=1
+chat .devtp -2030 -1700 5
+wait 3
+chat .uriel event door g2
+expect-log \[Uriel EVENT\] door-bound territory=11 group=g2 \S+ x=-2030\.0 y=5\.0 z=-1695\.0
+chat .devgo uec
+wait 3
+chat .uriel event marker g3 mob
+expect-log \[Uriel EVENT\] marker-added territory=11 group=g3 id=\d+ slot=mob floor=2
+chat .devtp -2012.5 -1691 10
+wait 3
+chat .uriel event door g3
+expect-log \[Uriel EVENT\] door-bound territory=11 group=g3 \S+ x=-2012\.5 y=10\.0 z=-1695\.0
+chat .devtp -2012.5 -1687 10
+wait 3
+chat .uriel event marker g4 boss
+expect-log \[Uriel EVENT\] marker-added territory=11 group=g4 id=\d+ slot=boss floor=2
+# --- run: start from the small ground room east of the stairwell
+chat .devtp -2014 -1705 5
+wait 3
+chat .uriel event start castle1
+expect-log \[Uriel EVENT\] floor-rolled floor=1 template=f1 of=1
+expect-log \[Uriel EVENT\] floor-rolled floor=2 template=f2 of=1
+expect-log \[Uriel EVENT\] group-rolled territory=11 group=g1 floor=1 squad=militia5 units=5 bosses=0 spawns=CHAR_Militia_
+expect-log \[Uriel EVENT\] group-rolled territory=11 group=g2 floor=1 squad=boss1of3 units=1 bosses=1 spawns=CHAR_Bandit_(Foreman|StoneBreaker|Stalker)_VBloodx1
+expect-log \[Uriel EVENT\] group-rolled territory=11 group=g3 floor=2 squad=skel10 units=10 bosses=0 spawns=CHAR_Undead_Skeleton
+expect-log \[Uriel EVENT\] group-rolled territory=11 group=g4 floor=2 squad=bosses2 units=2 bosses=2 spawns=CHAR_\S+VBlood\S*x1,CHAR_\S+VBlood\S*x1
+expect-log \[Uriel EVENT\] started territory=11 template=castle1 groups=4 units=18 bosses=3 doors=3 failedMarkers=0 scale=none limit=0 faction=CHAR_\S+VBlood
+expect-log \[Uriel EVENT\] clock-started territory=11 units=18 bosses=3
+wait 3
+chat .uriel event status
+expect-log \[Uriel EVENT\] status territory=11 run seconds=\S+ inPlace=True bossesLeft=3 bosses=3
+shot full layers-started
+# --- floor 1: g1 (mobs in the courtyard), then g2 (the boss in room H)
+chat .devtp -2030 -1713 5
+wait 2
+chat .uriel unit kill 7 mob
+expect-log \[Uriel UNIT\] killed n=5 which=mob
+expect-log \[Uriel EVENT\] group-cleared territory=11 group=g1 units=5 door=opened
+chat .devtp -2030 -1705 5
+wait 2
+chat .uriel unit kill 10 boss
+expect-log \[Uriel UNIT\] killed n=1 which=boss
+expect-log \[Uriel EVENT\] group-cleared territory=11 group=g2 units=1 door=opened
+# --- floor 2: g3 (the skeletons), then g4 (the two bosses): the bosses' clock and the completion
+chat .devgo uec
+wait 2
+chat .uriel unit kill 14 mob
+expect-log \[Uriel UNIT\] killed n=10 which=mob
+expect-log \[Uriel EVENT\] group-cleared territory=11 group=g3 units=10 door=opened
+chat .uriel event status
+expect-log \[Uriel EVENT\] status territory=11 run seconds=\S+ inPlace=True bossesLeft=2 bosses=3
+chat .uriel unit kill 14 boss
+expect-log \[Uriel UNIT\] killed n=2 which=boss
+expect-log \[Uriel EVENT\] group-cleared territory=11 group=g4 units=2 door=none
+expect-log \[Uriel EVENT\] bosses-defeated territory=11 bosses=3 seconds=\d
+expect-log \[Uriel EVENT\] complete territory=11 groups=4 seconds=\S+ bossSeconds=\d
+chat .uriel event history
+expect-log \[Uriel EVENT\] history territory=11 template=castle1 result=complete seconds=\S+ bossSeconds=\d\S* units=18 bosses=3
+shot full layers-complete
+console TPHome

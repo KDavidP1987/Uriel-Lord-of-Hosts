@@ -120,3 +120,14 @@ belongs here: things that bit once and must not bite twice.
   query found zero `Door` entities; with `IncludeDisabled | IncludeSpawnTag` it finds them, and a `Door.OpenState` /
   `Interactable.Disabled` write on a disabled door holds (the client shows it once a player comes near).
   `CastleDoors` and `CastleFloorIndex` query with those options.
+
+- **2026-10-15 (Castle Events) — a chat line is short (~120 characters).** Longer commands are cut off and the
+  missing tail silently falls back to defaults (a `... 1 distinct` lost its `distinct`). Keep command lines short:
+  accept unique short names (`Foreman_VBlood`), and give long lists a way in parts (`.uriel squad extend`).
+- **2026-10-15 — never build sentinels from `\u0000` with culture-sensitive string calls.** `s.StartsWith("\u0000")`
+  (culture comparison) is true for *every* string, because the null char is ignorable. Use a real field, or
+  `StringComparison.Ordinal`.
+- **2026-10-15 — not every dump name is a spawnable name.** `CHAR_Undead_SkeletonSoldier_Base` is in the prefab dump
+  (and `..._SkeletonCrossbow_Base`)
+  but not in `SpawnableNameToPrefabGuidDictionary`. `TryResolveUnitPrefab` falls back to every prefab's name
+  (`_PrefabLookupMap.GetName`).

@@ -171,8 +171,8 @@ def chat(cmd: str) -> None:
     send the letters as movement / ability keys (w/a/s/d/q/e/r/c/t) and walk the character away."""
     focus()
     _, d = _gui()
-    for attempt in range(3):
-        d.press("enter"); time.sleep(0.7)
+    for attempt in range(5):   # 5 tries, a longer wait each time: at night the hint is low-contrast and OCR misses it
+        d.press("enter"); time.sleep(0.7 + 0.3 * attempt)
         if chat_open():
             break
         d.press("esc"); time.sleep(0.5)   # whatever had focus (a menu, the console), close it and retry

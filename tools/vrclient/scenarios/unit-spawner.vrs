@@ -12,7 +12,10 @@ expect-reply No Uriel units
 chat .uriel unit spawn CHAR_VampireMale
 expect-reply can't be spawned as a unit
 expect-log \[Uriel UNIT\] refused prefab=CHAR_VampireMale
-# spawn three bandit thugs in front of Chaos
+# spawn three bandit thugs in front of Chaos, in the open courtyard (TPHome now lands in the owner's hedge maze,
+# where the spot in front is a hedge)
+chat .devtp -2030 -1717 5
+wait 3
 chat .uriel unit spawn CHAR_Bandit_Thug 3
 expect-reply Queued 3 x CHAR_Bandit_Thug
 expect-log \[Uriel UNIT\] queued prefab=CHAR_Bandit_Thug guid=-301730941 n=3

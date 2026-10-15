@@ -268,8 +268,47 @@ run), saved on every change and on unload.
   template-deleted|door-held|started|marker-failed|status|door-reshut|group-cleared|complete|stopped|door-released|
   door-pending|door-abandoned|refused`; spawned units carry `tag=ev...` on `[Uriel UNIT] queued|spawned`.
 
-Not yet (later phases): a timer, level scaling to entrants, an event toll door, maze stair variants, event objects,
-rewards, Raphael wire lines. Untested: the player path (PlayerEvents, costs, refusal on another's castle) needs a
+Superseded the same day: the flat template (`template set`) became the layers below.
+
+## Layers, random rolls, scaling, timer as built (2026-10-15, unreleased)
+
+The owner's model (message of 2026-10-15): "group 1 floor 1 spawn 5 militia; group 2 floor 1 spawn 1 boss; these
+feed a floor-one template; group 3 floor 2 10 skeletons, group 4 floor 2 2 bosses feed floor two; then a castle-wide
+template of floor 1 and 2." Code: `Services/CastleEventService.Library.cs`, `Services/UnitScaling.cs`.
+
+- **Squad** = what one group spawns. One or more **sets** (combinations); one set is rolled per run, by weight
+  (`squad weight`). A set is a list of **entries**: role `mob`/`boss`, a unit list, a count, a pick, a level.
+  `any` = each of the count drawn at random with repeats (an assortment); `distinct` = that many different ones
+  ("1 of these 3 bosses", "2 of these 10"). `squad extend` appends units to an entry (chat lines are short).
+- **Floor template** = layout group name (or `*`) -> squad list; several = one rolled per run.
+- **Template** = floor (`1`, `2`, … or `*`) -> floor-template list; several = one rolled per floor per run (a theme),
+  plus default run options.
+- **Start** `.uriel event start [name] [options]`: the name is a template, else a floor template (used for every
+  floor), else a squad (every group gets it); none = each group's own squad (`event squad`). Per group: its squad is
+  rolled; its mobs go round-robin to its mob markers, its bosses to its boss markers (to any marker if it has none of
+  that slot). A marker with its own unit keeps it. Everything resolves and fits the caps before anything spawns.
+- **Scaling** (run options; `UnitScaling`): `level=N` / `level±N` / `auto[+N]` (the highest player level on the plot,
+  `Equipment.GetFullLevel`) write `UnitLevel` (the game rescales base stats; V Bloods included here). Multipliers
+  `hp`, `dmg` (`pp`+`sp`), `speed`, `aspd` are `ModifyUnitStatBuff_DOTS` entries (`MultiplyBaseAdd`, value x-1) on
+  the unit's marker buff, Nyarlathotep's method. Presets: easy (hp, dmg 0.75), normal, hard (hp 1.5, dmg 1.25), brutal
+  (hp 2.5, dmg 1.5, speed 1.1, aspd 1.15). Template options first, the start's add to or override them.
+- **One faction per run** (default): every unit takes the faction (`FactionReference`) and `Team` of the run's first
+  boss, else its first unit. Found in testing: the floor-2 wolf V Blood killed a skeleton (beasts and undead are
+  hostile; undead, bandits and militia are allied, per Nyarlathotep's faction-mix test). Options `faction=keep` /
+  `mixed` opt out; `faction=one` / `allied` force it on over a template's `keep`. Logged: `started … faction=<prefab|keep>`,
+  `spawned … faction=Faction_Bandits/team=2:0`.
+- **Timer:** the clock starts when every unit of the run is in place (`clock-started`). Logged and announced: each
+  group cleared, all bosses down (`bosses-defeated … seconds=`), complete. `limit=` (max 6 h) warns at 60 and 10 s
+  and then fails the run (`time-up`, then a stop with `timed-out`). The last 100 runs are kept with template, options,
+  units, bosses, result, time and time to the last boss; `.uriel event history` shows the last 5 and the best times.
+- **Testing aid:** `.uriel unit kill [radius] [all|boss|mob]` (admin) kills Uriel's own units through the game's
+  kill path, so groups clear the way they do in play.
+- **Log lines added:** `squad-created|squad-entry|squad-extend|floor-template-created|floor-assign|template-created|
+  template-floor|template-options|*-deleted|group-squad|auto-level|floor-rolled|group-rolled|clock-started|
+  bosses-defeated|time-warning|time-up|timed-out|history`; `[Uriel UNIT] spawned … boss=1 scale=… level=N`,
+  `[Uriel UNIT] killed n= which= radius=`; unit status adds `pp= sp= mspd= aspd=`.
+
+Not yet (later phases): an event toll door, maze stair variants, event objects, rewards, Raphael wire lines. Untested: the player path (PlayerEvents, costs, refusal on another's castle) needs a
 second player.
 
 ## Testing
@@ -373,3 +412,38 @@ are separate rooms. On a stair, the floor lookup reads the ground stairwell up t
   no path to Chaos off the plot (they stayed Idle, no target). That test needs a new edge; the containment code
   itself is unchanged.
 - Logs: no Uriel errors or warnings; server log has no exceptions.
+
+### Session 5 · 2026-10-15 · layers, random rolls, scaling, timer, one faction (Claude via vrclient, world nyardev, plot 11)
+
+- `event-layers.vrs`: **PASS 37/37** (`%TEMP%\vrclient\results\event-layers-20261015-191116.json`). The owner's
+  example: squads militia5 (5 of guard/light militia, `any`), boss1of3 (1 of 3 V Bloods, `distinct`), skel10 (set 1:
+  10 soldiers; set 2: 6 soldiers + 4 crossbows), bosses2 (2 of 10 V Bloods, `distinct`, the list added in parts with
+  `squad extend`); floor templates f1 (g1, g2) and f2 (g3, g4); template castle1 (floor 1 f1, floor 2 f2). Groups g1
+  (courtyard, wood door), g2 (room H, metal door), g3 (upstairs, upstairs door), g4 (upstairs, boss marker). Start:
+  18 units, 3 bosses, 3 doors held; clock started 1.6 s later; each group cleared opened its door; bosses-defeated and
+  complete timed (54 s); history recorded.
+- Found and fixed on the way: chat lines are cut at ~120 characters (long `squad add` lost its `distinct`; short unit
+  names and `squad extend` added); the skeletons aren't in the game's spawnable-name list (name lookup falls back to
+  all prefab names); a squad started on its own matched every group through a `\u0000` sentinel and culture-sensitive
+  `StartsWith` (replaced by a field); **the wolf V Blood killed a skeleton** on floor 2 (one faction per run added; the
+  passing run had every unit on `Faction_Bandits/team=2:0` and only Chaos killed anything).
+- vrclient: the chat input won't open (OCR) while Chaos stands at (-2030, -1698) right by the metal door; the door is
+  bound from (-2030, -1700) instead.
+- `event-scaling.vrs`: **PASS 25/25** (`event-scaling-20261015-191622.json`). Courtyard thug readings:
+
+  | Run | level | hp | pp / sp | mspd | aspd |
+  |---|---|---|---|---|---|
+  | A none | 16 | 53.8 | 13.7 | 3.2 | 1.0 |
+  | B `level=40` | 40 | 99.4 | 26.6 | 3.2 | 1.0 |
+  | C `level=40,hp*2,dmg*1.5,speed*1.2,aspd*1.3` | 40 | 198.7 (x2.00) | 39.9 (x1.50) | 3.8 (x1.19) | 1.3 (x1.30) |
+
+  D `hard,auto+2`: the highest level on the plot was 66, so level 68 with hp*1.5, dmg*1.25. E: template `tscaled`
+  (`hp*3,limit=10m`) + start `speed*1.1` = `hp*3,speed*1.1`, limit 600 s. F `limit=25s`: 10 s warning, time-up at
+  25 s, run removed (4 units, 3 doors put back), history `timed-out`. Bad options (`hp*99`, `banana`, `limit=9d`)
+  refused before anything spawned.
+- Regression: `castle-event.vrs` **PASS 44/44** (now removes event-layers' g1-g4 first, which hold the same doors;
+  the rolls log before the doors are held), `unit-spawner.vrs` **PASS 23/23** (now spawns in the courtyard: TPHome
+  lands in the owner's new hedge maze, where the spot in front is a hedge). vrclient's chat opener retries 5 times
+  with longer waits (at night the chat hint is low-contrast and OCR missed it).
+- Logs: no Uriel errors or warnings; the only exceptions are the boot-time Harmony reflection warnings.
+- Scenario order on plot 11: `event-layers` builds the g1-g4 layout that `event-scaling` uses; `castle-event` removes it.

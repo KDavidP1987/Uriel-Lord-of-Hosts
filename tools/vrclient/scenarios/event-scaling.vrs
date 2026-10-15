@@ -1,0 +1,94 @@
+# event-scaling.vrs: Castle Events run options. Scaling (level, health, damage, speed, attack speed; presets; auto =
+# the highest player level on the plot), template default options merged with the start's, and the time limit.
+# Uses the g1-g4 layout event-layers.vrs leaves on plot 11; squad thug1 (1 thug) started on its own gives every group a
+# thug. Readings: '.uriel unit status' on the courtyard thug (level, hp, pp, sp, mspd, aspd); the ratios between runs
+# are checked from the log.
+# Needs: CastleEvents.Enabled=true; Chaos vulnerable.
+ensure
+console TPHome
+wait 3
+mark
+chat .devtp -2014 -1705 5
+wait 3
+chat .uriel event stop
+chat .uriel unit clear
+chat .uriel template delete tscaled
+chat .uriel floor delete fthug
+chat .uriel squad delete thug1
+wait 2
+chat .uriel squad create thug1
+chat .uriel squad add thug1 mob CHAR_Bandit_Thug 1
+expect-log \[Uriel EVENT\] squad-entry name=thug1 set=1 entry=1 role=mob units=CHAR_Bandit_Thug count=1
+# --- bad options are refused before anything spawns
+chat .uriel event start thug1 hp*99
+expect-reply Bad multiplier in 'hp*99'
+chat .uriel event start thug1 banana
+expect-reply Unknown scaling 'banana'
+chat .uriel event start thug1 limit=9d
+expect-reply Bad time limit 'limit=9d'
+# --- A: no scaling (the baseline)
+chat .uriel event start thug1
+expect-log \[Uriel EVENT\] started territory=11 template=thug1 groups=4 units=4 bosses=0 doors=3 failedMarkers=0 scale=none limit=0
+expect-log \[Uriel EVENT\] clock-started territory=11 units=4
+chat .devtp -2030 -1714 5
+wait 2
+chat .uriel unit status 6
+expect-log \[Uriel UNIT\] status key=\d+ prefab=CHAR_Bandit_Thug .* level=16 hp=\S+ pp=\S+ sp=\S+ mspd=\S+ aspd=\S+
+chat .uriel event stop
+expect-log \[Uriel EVENT\] stopped territory=11 units=4
+wait 3
+# --- B: level 40 (the game rescales the base stats)
+chat .devtp -2014 -1705 5
+wait 2
+chat .uriel event start thug1 level=40
+expect-log \[Uriel EVENT\] started territory=11 template=thug1 .*scale=level=40 limit=0
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug .*scale=level=40 level=40
+chat .devtp -2030 -1714 5
+wait 2
+chat .uriel unit status 6
+expect-log \[Uriel UNIT\] status key=\d+ prefab=CHAR_Bandit_Thug .* level=40 hp=\S+ pp=\S+
+chat .uriel event stop
+wait 3
+# --- C: level 40 and every multiplier
+chat .devtp -2014 -1705 5
+wait 2
+chat .uriel event start thug1 level=40,hp*2,dmg*1.5,speed*1.2,aspd*1.3
+expect-log \[Uriel EVENT\] started territory=11 template=thug1 .*scale=level=40,hp\*2,dmg\*1\.5,speed\*1\.2,aspd\*1\.3 limit=0
+chat .devtp -2030 -1714 5
+wait 2
+chat .uriel unit status 6
+expect-log \[Uriel UNIT\] status key=\d+ prefab=CHAR_Bandit_Thug .* level=40 hp=\S+ pp=\S+
+shot full scaled-thug
+chat .uriel event stop
+wait 3
+# --- D: a preset plus auto level (the highest player level on the plot, +2)
+chat .devtp -2014 -1705 5
+wait 2
+chat .uriel event start thug1 hard,auto+2
+expect-log \[Uriel EVENT\] auto-level territory=11 highest=\d+ level=\d+
+expect-log \[Uriel EVENT\] started territory=11 template=thug1 .*scale=level=\d+,hp\*1\.5,dmg\*1\.25 limit=0
+chat .uriel event stop
+wait 3
+# --- E: template default options merged with the start's ('*' floor and '*' group wildcards)
+chat .uriel floor create fthug
+chat .uriel floor assign fthug * thug1
+chat .uriel template create tscaled
+chat .uriel template floor tscaled * fthug
+chat .uriel template options tscaled hp*3,limit=10m
+expect-log \[Uriel EVENT\] template-options name=tscaled options=hp\*3,limit=10m
+chat .uriel event start tscaled speed*1.1
+expect-log \[Uriel EVENT\] started territory=11 template=tscaled groups=4 units=4 .*scale=hp\*3,speed\*1\.1 limit=600
+chat .uriel event status
+expect-log \[Uriel EVENT\] status territory=11 run seconds=\S+ inPlace=True bossesLeft=0 bosses=0 limit=600
+chat .uriel event stop
+wait 3
+# --- F: the time limit: a 10 s warning, then the run fails and is removed
+chat .uriel event start thug1 limit=25s
+expect-log \[Uriel EVENT\] started territory=11 template=thug1 .*limit=25
+expect-log \[Uriel EVENT\] clock-started territory=11 units=4 bosses=0 afterSeconds=\S+ limit=25
+expect-log \[Uriel EVENT\] time-warning territory=11 left=10 timeout=30
+expect-log \[Uriel EVENT\] time-up territory=11 limit=25 timeout=20
+expect-log \[Uriel EVENT\] timed-out territory=11 units=4 doorsRestored=3
+chat .uriel event history
+expect-log \[Uriel EVENT\] history territory=11 template=thug1 result=timed-out seconds=2\d
+console TPHome

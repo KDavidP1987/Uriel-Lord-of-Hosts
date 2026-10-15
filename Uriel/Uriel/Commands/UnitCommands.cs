@@ -37,6 +37,13 @@ internal static class UnitCommands
         ctx.Reply(Core.Units.List(ctx.Event.SenderCharacterEntity));
     }
 
+    [Command("kill", description: "Kill the Uriel units within the radius (default 15 m): all, boss or mob. A real death (event groups clear, doors open), unlike despawn. Only Uriel's own units. Usage: .uriel unit kill [radius] [all|boss|mob]", adminOnly: true)]
+    public static void Kill(ChatCommandContext ctx, float radius = 15f, string which = "all")
+    {
+        if (!Ready(ctx)) return;
+        ctx.Reply(Core.Units.KillNear(ctx.Event.SenderCharacterEntity, radius, which));
+    }
+
     [Command("despawn", description: "Remove the nearest Uriel unit within the radius (default 10 m). Usage: .uriel unit despawn [radius]", adminOnly: true)]
     public static void Despawn(ChatCommandContext ctx, float radius = 10f)
     {
