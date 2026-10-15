@@ -1,0 +1,11 @@
+# smoke.vrs: proves vrclient can join the dev server, run .uriel commands as admin and read the replies.
+# Needs: the dev server running with Uriel and DevChatEcho; Chaos in adminlist.txt.
+ensure
+console TPHome
+wait 3
+mark
+chat .uriel api version
+expect-reply [URIEL:
+chat .uriel unit list
+expect-reply Uriel units
+shot full smoke

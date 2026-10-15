@@ -28,6 +28,7 @@ internal static class Core
     public static ObjectSpawnService ObjectSpawn { get; private set; }
     public static ObjectConditionsService ObjectConditions { get; private set; }
     public static PlayerUnlockService PlayerUnlock { get; private set; }
+    public static UnitSpawnService Units { get; private set; }
 
     public static ManualLogSource Log => Plugin.PluginLog;
     public static bool IsReady { get; private set; }
@@ -86,6 +87,11 @@ internal static class Core
             // mid-session, not only at the next boot (config-gated).
             try { ObjectSpawn.StartOrphanSweepLoop(); }
             catch (System.Exception ex) { Log.LogWarning($"[Uriel SPAWN] orphan sweep start failed: {ex}"); }
+            // Castle-event units: the boot sweep runs even with the feature off, so units left by an earlier
+            // session are always removed (they are never persisted).
+            Units = new UnitSpawnService();
+            try { Units.Start(); }
+            catch (System.Exception ex) { Log.LogWarning($"[Uriel UNIT] start failed: {ex}"); }
             PublicStorage = new PublicStorageService();
             PublicStorage.Load();
             // Placement teams are restored from the game save; our share state lives only

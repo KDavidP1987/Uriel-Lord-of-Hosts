@@ -20,6 +20,9 @@ internal static class EntityExtensions
     public static T Read<T>(this Entity entity) where T : unmanaged =>
         Core.EntityManager.GetComponentData<T>(entity);
 
+    public static void Write<T>(this Entity entity, T value) where T : unmanaged =>
+        Core.EntityManager.SetComponentData(entity, value);
+
     public static bool TryGetComponent<T>(this Entity entity, out T component) where T : unmanaged
     {
         if (!entity.Exists() || !Core.EntityManager.HasComponent<T>(entity))

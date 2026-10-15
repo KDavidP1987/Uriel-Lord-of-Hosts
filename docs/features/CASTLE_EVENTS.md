@@ -145,6 +145,53 @@ Open, for the owner (needed by Phase 3):
 - **Admins draw no aggro while invulnerable** (lessons §3): tests need a vulnerable character or a second player.
 - **Never touch unmarked entities.** Nyarlathotep's `.devkill` once killed 232 world entities at a castle.
 
+## Phase 1 as built (2026-10-15, unreleased)
+
+`Services/UnitSpawnService.cs`, `Commands/UnitCommands.cs`, config `[CastleEvents]` (`Enabled` default **false**;
+caps `MaxUnitsPerCommand` 10, `MaxUnitsPerPlot` 60, `MaxTrackedUnits` 300; budgets `MaxSpawnsPerTick` /
+`MaxDespawnsPerTick` 5 per pump, about 6 pumps a second; `UnitLifetimeSeconds` 3600; `ClearDrops` true).
+
+- **Recipe** (lessons §1): `InstantiateEntityImmediate` → marker buff (`AB_Consumable_PhysicalPowerPotion_T01_Buff`,
+  gameplay-event components stripped, stat buffer cleared, own LifeTime 0/None) with `SpellLevel = 1431456069`
+  ("URIE", Uriel's own value) → LifeTime/Destroy + `Age = 0` → Translation/LastTranslation → `DestroyWhenDisabled`
+  → drop table cleared → `CanDisable = false`, aggro on, optional level. A unit failing any step is destroyed.
+- **Ledger and queues:** spawn and despawn queues drained every 5 frames under the budgets; units the game removed
+  are pruned each pump; deaths are read in the existing `DeathEventListenerSystem` postfix with the killer chain
+  (up to three `EntityOwner` hops to a player).
+- **Boot sweep:** every buff carrying the marker (`IncludeDisabled | IncludeSpawnTag`) → its unit is queued for
+  removal. Units are never persisted. Runs even with the feature off.
+- **Refused:** anything not `CHAR_*` with Health + UnitLevel + AggroConsumer; player characters;
+  `DropInInventoryOnSpawn`; name fragments `Mount_Horse`, `CarriagePrisonerRelease`, `MicroPOI`,
+  `Undead_ShadowSoldier`, `VampireMale/Female`, servants, prisoners, `_Summon`, `Dummy`, `Test`.
+- **Placement:** 2.5 m in front of the admin (or `aim`), several units on a 1.2 m golden-angle ring; the spot must
+  resolve to a claimed, alive castle plot (`ObjectSpawnService.TryResolvePlot` + `CastleClaimedAndAlive`).
+- **Commands (admin):** `.uriel unit spawn <name|guid> [count] [level] [here|aim]`, `list`, `despawn [radius]`,
+  `clear` (this plot), `purge` + `purge confirm` (works with the feature off), `status [radius]`,
+  `probe [label] [here|aim]`, `probemap [label] [radius]`.
+- **Log lines** for tests: `[Uriel UNIT] queued|spawned|status|despawned|gone|died|purge|refused|boot sweep`,
+  `[Uriel PROBE] label=…|map|row|map-end`.
+
+## Testing
+
+In-game tests follow Nyarlathotep's practice (CLAUDE.md › In-game tests): `tools/devserver.ps1` stops, deploys and
+starts the shared dev server; `tools/vrclient/` plays Chaos on 127.0.0.1:9876 and runs `tools/vrclient/scenarios/*.vrs`.
+
 ## Test results
 
-None yet.
+### Session 1 · 2026-10-15 · Phase 1 unit spawner + spike 1 baseline (Claude via vrclient, world nyardev, plot 11)
+
+- `smoke.vrs`: **SCENARIO PASS 3/3** (`[URIEL:version] api=1 plugin=0.20.0 ready=1`).
+- `unit-spawner.vrs`: **SCENARIO PASS 23/23** (results `%TEMP%\vrclient\results\unit-spawner-20261015-125028.json`).
+  Refused `CHAR_VampireMale`; queued 3 `CHAR_Bandit_Thug` at x=-2001.7 y=5.0 z=-1716.7 (hlevel 11, territory 11),
+  all 3 spawned over consecutive pumps; still alive 15 s later (no `gone`); despawn 1, clear 2 (`left=0`); purge
+  arm + confirm removed 2; list empty after. Boot sweep at start: `found=0 queued=0`.
+- **Aggro (spike 2, first reading):** with Chaos vulnerable (727 HP), all 3 thugs were `state=Combat target=me` within
+  2 s at 1.2-1.8 m, level 16 (prefab level), full HP. Outdoors on the plot; indoors not yet tested.
+- **Spike 1 baseline** (`castle-probe.vrs`, **PASS 4/4**): Chaos's plot is **bare** (heart only, no floors or walls),
+  so this is the open-ground reference. At hlevel 11 (y 5.0), trees and rocks read as 2x2 `##` blocks among `.`
+  ground (59 blocked / 565 free in a 25 x 25 m square); hlevel 12 reads **all blocked** (624/624): a level with no
+  surface is not free. So a second storey should show as free cells on a higher level, and walls as `#` lines.
+- Logs: no Uriel errors or warnings. Unity log has 224 "PrefabGUID … unknown state" warnings at world load (the
+  known baseline, ~226 in Nyarlathotep's notes).
+- **Blocker for spikes 1-6:** they need a built castle. The owner builds a small test structure on plot 11 (see
+  the session summary for the spec), then the spikes run unattended.

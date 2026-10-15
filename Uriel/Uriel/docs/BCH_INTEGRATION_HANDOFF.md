@@ -384,6 +384,21 @@ spot" message rather than treat the spawn as succeeded. Floors never trigger it 
 Server-gated by `ObjectSpawn.PreventOverlap` (default on); when an admin turns it off, the refusal never
 fires. No command/arg/wire shape changed — only this added failure path.
 
+### 📋 Castle Events — admin unit commands (Phase 1, 2026-10-15, unreleased; no wire lines yet)
+
+New chat surface, **admin-only**, off by default (`[CastleEvents] Enabled`). Human-text replies only; no
+`[URIEL:*]` lines and no ApiVersion change yet. Raphael needs nothing now. Spawn points (Phase 2) are the first part
+meant for a Raphael UI: they will get wire lines and a section here when they land. Design:
+`docs/features/CASTLE_EVENTS.md` (repo root).
+
+| Command | Reply starts with |
+|---|---|
+| `.uriel unit spawn <name\|guid> [count] [level] [here\|aim]` | `Queued N x <prefab>` / refusal text |
+| `.uriel unit list` | `Uriel units: …` or `No Uriel units.` |
+| `.uriel unit despawn [radius]` / `clear` | `Removing …` |
+| `.uriel unit purge [confirm]` | arm text / `Purging N unit(s)` |
+| `.uriel unit status [radius]` / `probe` / `probemap` | diagnostics (details go to the server log) |
+
 ## 7. Change discipline (the living-contract rule)
 
 Same rule as Beelzebub's handoff: **whenever Uriel work changes anything

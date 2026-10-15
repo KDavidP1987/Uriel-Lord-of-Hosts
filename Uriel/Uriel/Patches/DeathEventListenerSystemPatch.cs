@@ -23,13 +23,22 @@ internal static class DeathEventListenerSystemPatch
     [HarmonyPostfix]
     public static void OnUpdatePostfix(DeathEventListenerSystem __instance)
     {
-        if (!Core.IsReady || Core.ObjectSpawn is null) return;
-        if (!Core.ObjectSpawn.TracksKills) return; // cheap config gate — skip all work otherwise
+        if (!Core.IsReady) return;
+        bool discovery = Core.ObjectSpawn is not null && Core.ObjectSpawn.TracksKills; // cheap config gate
+        bool units = Core.Units is not null && Core.Units.TracksAny;                   // castle-event unit deaths
+        if (!discovery && !units) return;
 
         NativeArray<DeathEvent> deaths = default;
         try
         {
             deaths = __instance._DeathEventQuery.ToComponentDataArray<DeathEvent>(Allocator.Temp);
+            // Each consumer in its own try, so one failure never skips the other.
+            if (units)
+            {
+                try { Core.Units.HandleDeaths(deaths); }
+                catch (Exception ex) { Core.Log.LogError($"[Uriel UNIT] death read failed: {ex.Message}"); }
+            }
+            if (!discovery) return;
             for (int i = 0; i < deaths.Length; i++)
             {
                 DeathEvent death = deaths[i];

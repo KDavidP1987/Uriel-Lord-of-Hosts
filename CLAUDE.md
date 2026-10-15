@@ -179,6 +179,25 @@ edits to `Commands/*.cs`, `Config/Settings.cs`, and the share-mechanism
 service files as a backstop; this CLAUDE.md rule is authoritative. The two
 workspaces never cross-edit — integration flows through chat commands only.
 
+## In-game tests: Claude runs them itself (vrclient)
+
+Adopted from Nyarlathotep 2026-10-15. Tool: `tools/vrclient/` (guide: `tools/vrclient/README.md`). Claude plays the
+real client as the owner's character **`Chaos`** on the shared local dev server **127.0.0.1:9876** (world `nyardev`,
+Chaos's plot = territory 11; NyarDevTools `.dev*` commands and DevChatEcho are deployed there).
+
+- Server loop: `pwsh tools/devserver.ps1 status | stop | start | deploy` (backs up both logs, closes the client,
+  stops with `taskkill` without `/F`, builds, verifies the deployed DLL hash, waits for `Uriel initialized`).
+  Claude stops, starts and redeploys this dev server without asking (it is a dev server).
+- Every feature gets a scenario `tools/vrclient/scenarios/<feature>.vrs`; its `SCENARIO PASS n/n` line and results
+  JSON are the evidence, recorded under the feature doc's `## Test results`. Every scenario starts with
+  `console TPHome`.
+- The mod writes one greppable log line per state change a test needs (`[Uriel <SUBSYSTEM>] key=value …`).
+  Diagnostic before fix: if a failure's cause isn't proven, the next build adds the log line that names it.
+- Tell the owner before a run (it takes over mouse, keyboard and their Steam client). After the session, read
+  every `[Error`/`[Warning` in both `BepInEx/LogOutput.log` and `logs/NyarDev.log`.
+- Hand the owner only what the tool can't judge (look and feel, multiplayer, precise aim, building): start with
+  "connect to 127.0.0.1:9876", numbered steps, exact commands, and a one-line PASS condition each.
+
 ## Git workflow
 
 - Conventional Commits:

@@ -1,0 +1,13 @@
+# castle-probe.vrs: Castle Events spike 1. Does the static tile map see castle-built walls and floors? Writes a probe
+# and an ASCII map at Chaos's home spot; the map is compared with the screenshot by hand.
+# Needs: CastleEvents.Enabled=true; TPHome lands inside Chaos's castle.
+ensure
+console TPHome
+wait 3
+mark
+chat .uriel unit probe home
+expect-log \[Uriel PROBE\] label=home .*hlevel=\d+
+chat .uriel unit probemap home 12
+expect-log \[Uriel PROBE\] map-end label=home level=\d+ blocked=\d+
+expect-log \[Uriel PROBE\] map-end label=home level=\d+ blocked=\d+
+shot full castle-probe-home

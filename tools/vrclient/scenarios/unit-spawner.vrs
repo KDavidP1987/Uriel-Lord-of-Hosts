@@ -1,0 +1,50 @@
+# unit-spawner.vrs: proves Castle Events Phase 1 in game. An admin spawns units into a castle plot, the units survive
+# with no player nearby being needed, a status read sees them, and despawn, clear and the two-step purge remove them.
+# A player prefab is refused.
+# Needs: CastleEvents.Enabled=true; TPHome lands inside Chaos's castle plot; Chaos invulnerable (units ignore him).
+ensure
+console TPHome
+wait 3
+mark
+chat .uriel unit list
+expect-reply No Uriel units
+# refused: a player character prefab
+chat .uriel unit spawn CHAR_VampireMale
+expect-reply can't be spawned as a unit
+expect-log \[Uriel UNIT\] refused prefab=CHAR_VampireMale
+# spawn three bandit thugs in front of Chaos
+chat .uriel unit spawn CHAR_Bandit_Thug 3
+expect-reply Queued 3 x CHAR_Bandit_Thug
+expect-log \[Uriel UNIT\] queued prefab=CHAR_Bandit_Thug guid=-301730941 n=3
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug .*tracked=3
+wait 3
+shot full unit-spawner-thugs
+chat .uriel unit status 30
+expect-reply 3 unit(s) within
+expect-log \[Uriel UNIT\] status n=3
+# they are still there 15 s later (DestroyWhenDisabled did not remove them)
+wait 15
+expect-no-log \[Uriel UNIT\] (gone|spawn failed|spawn threw)
+chat .uriel unit list
+expect-reply 3 alive
+# remove one, then the rest of the plot
+chat .uriel unit despawn
+expect-reply Removing CHAR_Bandit_Thug
+expect-log \[Uriel UNIT\] despawned key=\d+
+chat .uriel unit clear
+expect-reply Removing 2 unit(s) on this plot
+expect-log \[Uriel UNIT\] despawned key=\d+ left=\d+
+expect-log \[Uriel UNIT\] despawned key=\d+ left=0
+# the kill switch: arm, confirm
+chat .uriel unit spawn CHAR_Bandit_Thug 2
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug .*tracked=2
+chat .uriel unit purge
+expect-reply within 30 s
+chat .uriel unit purge confirm
+expect-reply Purging 2 unit(s)
+expect-log \[Uriel UNIT\] purge queued=2
+wait 3
+chat .uriel unit list
+expect-reply No Uriel units

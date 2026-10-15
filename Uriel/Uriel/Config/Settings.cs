@@ -45,6 +45,16 @@ internal static class Settings
     public static ConfigEntry<bool> PublicPrison_Enabled { get; private set; }
     public static ConfigEntry<float> PublicStorage_MaxTargetDistance { get; private set; }
 
+    // ---- Feature: castle events (docs/features/CASTLE_EVENTS.md) — Phase 1: admin unit spawner ----
+    public static ConfigEntry<bool> CastleEvents_Enabled { get; private set; }
+    public static ConfigEntry<int> CastleEvents_MaxUnitsPerCommand { get; private set; }
+    public static ConfigEntry<int> CastleEvents_MaxUnitsPerPlot { get; private set; }
+    public static ConfigEntry<int> CastleEvents_MaxTrackedUnits { get; private set; }
+    public static ConfigEntry<int> CastleEvents_MaxSpawnsPerTick { get; private set; }
+    public static ConfigEntry<int> CastleEvents_MaxDespawnsPerTick { get; private set; }
+    public static ConfigEntry<int> CastleEvents_UnitLifetimeSeconds { get; private set; }
+    public static ConfigEntry<bool> CastleEvents_ClearDrops { get; private set; }
+
     // ---- Diagnostics ----
     public static ConfigEntry<bool> VerboseLogging { get; private set; }
 
@@ -235,6 +245,41 @@ internal static class Settings
             "PublicStorage", "MaxTargetDistance", 5f,
             "How close (meters) your aim point must be to a container for '.uriel share'/'.uriel unshare' " +
             "to target it.");
+
+        CastleEvents_Enabled = config.Bind(
+            "CastleEvents", "Enabled", false,
+            "EXPERIMENTAL. Allow admins to spawn NPC units into castle plots with '.uriel unit ...' " +
+            "(the foundation for castle events). Spawned units are never saved: they are removed at the next " +
+            "boot, by '.uriel unit purge', or by the game itself when their lifetime runs out.");
+
+        CastleEvents_MaxUnitsPerCommand = config.Bind(
+            "CastleEvents", "MaxUnitsPerCommand", 10,
+            "Most units one '.uriel unit spawn' may queue.");
+
+        CastleEvents_MaxUnitsPerPlot = config.Bind(
+            "CastleEvents", "MaxUnitsPerPlot", 60,
+            "Most Uriel units alive on one castle plot at once.");
+
+        CastleEvents_MaxTrackedUnits = config.Bind(
+            "CastleEvents", "MaxTrackedUnits", 300,
+            "Most Uriel units alive on the whole server at once.");
+
+        CastleEvents_MaxSpawnsPerTick = config.Bind(
+            "CastleEvents", "MaxSpawnsPerTick", 5,
+            "Units created per spawn tick (about 6 ticks a second). Spreads large spawns over frames.");
+
+        CastleEvents_MaxDespawnsPerTick = config.Bind(
+            "CastleEvents", "MaxDespawnsPerTick", 5,
+            "Units removed per spawn tick. Spreads large removals over frames.");
+
+        CastleEvents_UnitLifetimeSeconds = config.Bind(
+            "CastleEvents", "UnitLifetimeSeconds", 3600,
+            "Safety net: the game itself destroys a spawned unit after this many seconds, even if Uriel " +
+            "is removed from the server.");
+
+        CastleEvents_ClearDrops = config.Bind(
+            "CastleEvents", "ClearDrops", true,
+            "Spawned units drop no loot.");
 
         VerboseLogging = config.Bind(
             "Diagnostics", "VerboseLogging", false,

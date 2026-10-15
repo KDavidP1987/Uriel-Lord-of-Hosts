@@ -492,7 +492,7 @@ internal sealed class ObjectSpawnService
     /// the CastleHeart whose CastleTerritoryEntity carries that index. Returns false for
     /// open world (no territory). Built fresh per call (spawns are infrequent; current beats cached).
     /// </summary>
-    bool TryResolvePlot(float3 pos, out Entity heart, out int territoryIndex)
+    internal bool TryResolvePlot(float3 pos, out Entity heart, out int territoryIndex)
     {
         heart = Entity.Null;
         territoryIndex = GetTerritoryIndex(pos);
@@ -517,7 +517,7 @@ internal sealed class ObjectSpawnService
     /// facing, kept at the character's feet height. Used for `here`/at-player spawns so the object
     /// lands in FRONT of the player rather than on top of them. Falls back to the raw feet position
     /// if the facing can't be read.</summary>
-    static float3 InFrontOf(Entity character, float3 feet)
+    internal static float3 InFrontOf(Entity character, float3 feet)
     {
         if (character.TryGetComponent<Rotation>(out var rot))
         {
@@ -588,7 +588,7 @@ internal sealed class ObjectSpawnService
     }
 
     /// <summary>Does the character's team own this castle heart? (admins bypass this).</summary>
-    static bool OwnsHeart(Entity character, Entity heart)
+    internal static bool OwnsHeart(Entity character, Entity heart)
     {
         if (!heart.TryGetComponent<Team>(out var heartTeam)) return false;
         if (!character.TryGetComponent<Team>(out var charTeam)) return false;
@@ -607,7 +607,7 @@ internal sealed class ObjectSpawnService
     ///     (relinquished). A heart whose entity was destroyed outright never reaches here — its territory
     ///     resolves no heart, so <see cref="TryResolvePlot"/> already fails.
     /// </summary>
-    static bool CastleClaimedAndAlive(Entity heart)
+    internal static bool CastleClaimedAndAlive(Entity heart)
     {
         if (!heart.Exists()) return false;
         if (heart.TryGetComponent<CastleHeart>(out var ch))
