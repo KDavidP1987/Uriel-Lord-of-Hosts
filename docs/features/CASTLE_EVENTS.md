@@ -28,6 +28,13 @@ A castle owner, or an admin, turns a castle into an event space:
 9. **End conditions.** A timer, or detection that the entrants beat every boss or reached a goal.
 10. **Stop and clean up.** Turn the event off: despawn every unit and every event object, restore stairs.
 11. **Later: triggers.** A public door with a toll; paying starts the event and loads the mobs. Schedules.
+12. **Open areas, not only rooms** (2026-10-15, after building the test floor). Parts of a castle may have no walls
+    and no designated room: on the lowest level a player may spawn units on natural ground or on outdoor floors laid
+    out like a garden or a hedge maze. Spawning must not require a room.
+13. **Never outside your own castle.** A player can't spawn units in the open world or in a castle that isn't
+    theirs. Part of that test needs testers who own other castles (the dev server has only Chaos's).
+14. **Units never leave the castle.** Spawned units stay on the castle plot. Narrower containment is wanted too: a
+    unit kept to its room (it can't pass a doorway), or to its floor; chosen per unit or per floor.
 
 ## Model
 
@@ -70,7 +77,11 @@ Each phase works and is tested on the live server before the next starts. The ki
 One short test each, a greppable `[uriel …]` log line per reading, results recorded below.
 
 1. Does the tile map see castle-built floors, walls, doors and stairs? (lessons §11.1; decides placement checks)
+   **Answered (Session 2):** walls read blocked, castle floors read free with ground; and the game's own room data
+   (`CastleFloor` → `CastleRoomConnection.RoomEntity`) says which room every floor tile belongs to. Stairs untested.
 2. Do units chase through an open doorway, around a corner, up a storey? Does a closed door hold them? (§11.2, §11.3)
+   **Partly answered (Session 2):** they follow through an open entrance; behind a closed door they never noticed
+   Chaos 12 m away. Up a storey untested (no second floor yet).
 3. Do units keep their storey in a fight? (§11.4)
 4. What do servants, defences and the heart do; does a unit hitting a structure count as raid damage? (§11.5)
 5. Do units in a castle with no players near stay alive and un-frozen? (§11.6)
@@ -132,6 +143,12 @@ Decided (owner, 2026-10-15):
    the game client through scripted scenarios and admin console commands, then reads the server logs and data
    to judge results and iterate.
 
+4. **Spawning needs a plot, not a room** (vision 12): any free spot on a claimed, alive plot. A spot inside a wall
+   or obstacle is refused.
+5. **Containment** (vision 14): every unit always stays on its plot. Narrower scopes are per spawn today (per unit)
+   and become a property of a spawn point and a zone default (per floor) in Phase 2: `room` (the game's room under
+   the spawn spot; it ends at walls and doorways), `storey`, and a leash radius, combinable.
+
 Open, for the owner (needed by Phase 3):
 
 1. **Scaling target** when several players enter at different levels: highest, average, or the starter.
@@ -165,11 +182,43 @@ caps `MaxUnitsPerCommand` 10, `MaxUnitsPerPlot` 60, `MaxTrackedUnits` 300; budge
   `Undead_ShadowSoldier`, `VampireMale/Female`, servants, prisoners, `_Summon`, `Dummy`, `Test`.
 - **Placement:** 2.5 m in front of the admin (or `aim`), several units on a 1.2 m golden-angle ring; the spot must
   resolve to a claimed, alive castle plot (`ObjectSpawnService.TryResolvePlot` + `CastleClaimedAndAlive`).
-- **Commands (admin):** `.uriel unit spawn <name|guid> [count] [level] [here|aim]`, `list`, `despawn [radius]`,
+- **Commands (admin):** `.uriel unit spawn <name|guid> [count] [level] [here|aim] [contain]` (see Containment),
+  `list`, `despawn [radius]`, `rooms`,
   `clear` (this plot), `purge` + `purge confirm` (works with the feature off), `status [radius]`,
   `probe [label] [here|aim]`, `probemap [label] [radius]`.
 - **Log lines** for tests: `[Uriel UNIT] queued|spawned|status|despawned|gone|died|purge|refused|boot sweep`,
   `[Uriel PROBE] label=…|map|row|map-end`.
+
+## Containment as built (2026-10-15, unreleased)
+
+`Services/CastleFloorIndex.cs` plus a containment section in `UnitSpawnService`. Config `[CastleEvents]
+ContainCheckSeconds` (default 1).
+
+- **Scopes**, the last `spawn` argument: `plot` (default, and always enforced), `room`, `storey` (or `floor`), a
+  leash radius in metres (3-60), or a comma mix such as `room,15`. Unknown words and out-of-range radii are refused
+  before anything spawns. The reply ends `contained to: <scope>`.
+- **Rooms are the game's own.** Every `CastleFloor` links to a room (`CastleRoomConnection.RoomEntity`); a room ends
+  at its walls, doorways included. An area with floors but missing walls is one room spanning the connected floors
+  (the courtyard on plot 11 is one 102-tile room). `room` containment needs a floor that belongs to a room under the
+  spawn spot; on natural ground use `plot`, `storey` or a leash.
+- **Floor lookup:** floors are 5 m tiles on the same 5 m blocks as territories. The index caches each castle's floors
+  by block (refreshed every 15 s, and on every spawn on the plot) and each territory's blocks, so the per-second check
+  is a dictionary lookup. The floor under a position is the highest one in its block at or below it (+1.5 m).
+- **Spawn home:** at spawn, `AggroConsumer.PreCombatPosition` and `SpawnTransform.Position` are the spawn spot; with a
+  leash, `AggroConsumer.MaxDistanceFromPreCombatPosition` is the leash, so the game itself gives up the chase and
+  walks home (Session 2: it does, before the hard return is needed).
+- **The hard return** (Nyarlathotep's arena): every check, a unit outside its scope (`plot`: its position's block not
+  in the territory; `storey`: more than 2.5 m above or below its spawn height; leash: more than leash + 2 m from its
+  spawn spot; `room`: no floor, or a floor of another room) loses its AggroBuffer entries on players outside the same
+  scope and is moved to its spawn spot (Translation, LastTranslation, return point, path cleared, velocity zeroed).
+  One `[Uriel UNIT] contain key=… reason=plot|storey|leash|room|room-nofloor … dropped=N returns=N` line each.
+- **Blocked spots** are refused: a 0.4 m circle at the spot's height level that the static tile map reports blocked.
+- **Survey:** `.uriel unit rooms` writes each room (tiles, heights, enclosed / missing walls / roof, bounds), a 5 m
+  block map of the plot per storey (a letter per room), and every door and wall entrance with the rooms on each side.
+  `.uriel unit probe` also reports the floor and room under you.
+
+Watch: a returned unit drops only the players outside its scope, so a player standing in the doorway could pull it
+back out repeatedly. Session 2 saw one return per unit and no rubber-banding.
 
 ## Testing
 
@@ -195,3 +244,32 @@ starts the shared dev server; `tools/vrclient/` plays Chaos on 127.0.0.1:9876 an
   known baseline, ~226 in Nyarlathotep's notes).
 - **Blocker for spikes 1-6:** they need a built castle. The owner builds a small test structure on plot 11 (see
   the session summary for the spec), then the spikes run unattended.
+
+### Session 2 · 2026-10-15 · containment, built ground floor (Claude via vrclient, world nyardev, plot 11)
+
+The owner built a ground floor: 177 floor tiles in 7 rooms (`.uriel unit rooms`): a 102-tile outdoor-floor courtyard
+(missing walls, no roof), a 38-tile enclosed hall north of it, and five smaller rooms, joined by 12 openings: two
+closed wide doors (wood, metal), wide and plain stone entrances, a wood entrance. No second storey yet. The plot is a
+plateau: a 30 m cliff to the south (y -25) and 5 m drops east and north (y 0); level ground continues west (y 5).
+
+- `floor-survey.vrs`: **PASS 5/5**. Probe at home: floor (-2002.5, 5.0, -1712.5), courtyard room, `enclosed=False
+  missingWalls=True roof=False`. Tile map: walls are `#` rows, outdoor floors `.`; the level above reads all blocked.
+- `castle-contain.vrs`: **PASS 31/31** (results `%TEMP%\vrclient\results\castle-contain-20261015-144927.json`).
+  - Refused: a spawn 15 m off the plot ("Units can only be spawned inside a castle plot."), containment `sideways`,
+    leash 500. An earlier draft also proved the blocked-spot refusal: a spot 0.7 m from a room's wall was refused.
+  - **Plot:** 2 thugs at the courtyard's west edge chased Chaos 12 m off the plot; both returned at x -2041 (edge
+    -2040), 8-9 m from spawn, 1 player entry dropped each, then Idle at their spawn spots.
+  - **Leash control** (no leash): Chaos stepped 12 m away; both followed, Combat on Chaos at 1.1-1.4 m.
+    **Leash 6:** the same move; both Idle 2.9-4.2 m from spawn, no hard return: the game's own leash did it.
+  - **Room:** 2 thugs in a 10-tile enclosed room followed Chaos to its open entrance; each was returned the moment it
+    stood on the hall's floor (x -2022.6 and -2024.4; the entrance is at x -2025). **Control** (plot only): both
+    followed into the hall, Combat on Chaos, no return.
+  - **Closed door (observation):** 2 thugs in the room between the two closed doors, Chaos 12 m away beyond the wood
+    door: both stayed Idle, no target. A closed castle door already holds units.
+- Regression after the last build: `smoke` 3/3, `unit-spawner` 23/23.
+- Logs: no Uriel errors or warnings; the server log has no exceptions. Other mods' start-up warnings only.
+- Tool fixes: `devserver.ps1` now minimizes the server's BepInEx console (it covered the main menu and vrclient's
+  OCR couldn't find PLAY). One run lost the chat box for a few steps inside the castle (OCR); it didn't recur.
+- **Still open:** `storey` containment and units on stairs (needs a second floor); refusal on another player's castle
+  (needs a tester's castle and Phase 2's player path, since admins may spawn anywhere); sunlight, servants and raid
+  damage (spikes 4 and 6).

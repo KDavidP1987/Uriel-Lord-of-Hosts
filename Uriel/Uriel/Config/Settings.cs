@@ -54,6 +54,7 @@ internal static class Settings
     public static ConfigEntry<int> CastleEvents_MaxDespawnsPerTick { get; private set; }
     public static ConfigEntry<int> CastleEvents_UnitLifetimeSeconds { get; private set; }
     public static ConfigEntry<bool> CastleEvents_ClearDrops { get; private set; }
+    public static ConfigEntry<float> CastleEvents_ContainCheckSeconds { get; private set; }
 
     // ---- Diagnostics ----
     public static ConfigEntry<bool> VerboseLogging { get; private set; }
@@ -280,6 +281,11 @@ internal static class Settings
         CastleEvents_ClearDrops = config.Bind(
             "CastleEvents", "ClearDrops", true,
             "Spawned units drop no loot.");
+
+        CastleEvents_ContainCheckSeconds = config.Bind(
+            "CastleEvents", "ContainCheckSeconds", 1f,
+            "How often spawned units are checked against their containment (the castle plot always; a room, " +
+            "storey or leash radius when the spawn asked for one). A unit outside is returned to its spawn spot.");
 
         VerboseLogging = config.Bind(
             "Diagnostics", "VerboseLogging", false,

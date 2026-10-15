@@ -21,12 +21,12 @@ internal static class UnitCommands
         return true;
     }
 
-    [Command("spawn", description: "Spawn NPC units into the castle plot you're in, 2.5 m in front of you ('aim' = at your aim point). Optional level (0 = the prefab's own). Usage: .uriel unit spawn <name|guid> [count] [level] [here|aim]", adminOnly: true)]
-    public static void Spawn(ChatCommandContext ctx, string prefab, int count = 1, int level = 0, string where = "here")
+    [Command("spawn", description: "Spawn NPC units into the castle plot you're in, 2.5 m in front of you ('aim' = at your aim point). Optional level (0 = the prefab's own). Units never leave the plot; 'contain' narrows that: room, storey, a leash radius in metres, or a mix like room,15. Usage: .uriel unit spawn <name|guid> [count] [level] [here|aim] [plot|room|storey|<m>]", adminOnly: true)]
+    public static void Spawn(ChatCommandContext ctx, string prefab, int count = 1, int level = 0, string where = "here", string contain = "plot")
     {
         if (!Ready(ctx)) return;
         bool atAim = string.Equals(where, "aim", System.StringComparison.OrdinalIgnoreCase);
-        Core.Units.Enqueue(ctx.Event.SenderCharacterEntity, ctx.Event.User.PlatformId, prefab, count, level, atAim, out string message);
+        Core.Units.Enqueue(ctx.Event.SenderCharacterEntity, ctx.Event.User.PlatformId, prefab, count, level, atAim, contain, out string message);
         ctx.Reply(message);
     }
 
@@ -71,6 +71,13 @@ internal static class UnitCommands
     {
         if (!Ready(ctx)) return;
         ctx.Reply(Core.Units.ProbeMap(ctx.Event.SenderCharacterEntity, radius, label));
+    }
+
+    [Command("rooms", description: "Write the castle's rooms (the game's own: floors, storeys, enclosed or not) and a map of the plot per storey to the server log. Room containment keeps a unit in the room it spawned in. Usage: .uriel unit rooms", adminOnly: true)]
+    public static void Rooms(ChatCommandContext ctx)
+    {
+        if (!Ready(ctx)) return;
+        ctx.Reply(Core.Units.Rooms(ctx.Event.SenderCharacterEntity));
     }
 
     [Command("probe", description: "Read the tile map where you stand (or at your aim point): height level, and free/blocked and ground/air for nearby levels. Label it for the log. Usage: .uriel unit probe [label] [here|aim]", adminOnly: true)]

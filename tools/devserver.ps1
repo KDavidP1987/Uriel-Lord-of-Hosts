@@ -76,6 +76,10 @@ function Start-DevServer {
     }
     if (-not ($setup -and $uriel)) { throw "server not ready after 300 s (setup=$setup uriel=$uriel)" }
     Select-String -Path $PluginLog -Pattern 'Uriel initialized|\[Uriel UNIT\] boot sweep' | ForEach-Object { Write-Host $_.Line }
+    # The server's BepInEx console opens in Windows Terminal over the game's main menu, where vrclient's OCR then
+    # can't find PLAY (2026-10-15). Minimize it; -WindowStyle on Start-Process doesn't reach a Terminal window.
+    Add-Type -Namespace DevServer -Name Win -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int c);' -ErrorAction SilentlyContinue
+    Get-Process | Where-Object { $_.MainWindowTitle -like 'BepInEx*VRisingServer*' } | ForEach-Object { [void][DevServer.Win]::ShowWindow($_.MainWindowHandle, 6) }
     Write-Host 'server: ready'
 }
 

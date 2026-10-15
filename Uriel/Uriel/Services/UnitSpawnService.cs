@@ -6,7 +6,9 @@ using System.Text;
 using Il2CppInterop.Runtime;
 using ProjectM;
 using ProjectM.Behaviours;
+using ProjectM.CastleBuilding;
 using ProjectM.Network;
+using ProjectM.Pathfinding;
 using ProjectM.Shared;
 using ProjectM.Tiles;
 using Stunlock.Core;
@@ -52,6 +54,28 @@ internal sealed class UnitSpawnService
         "VampireMale", "VampireFemale", "_Servant", "Servant_", "Prisoner", "_Summon", "Dummy", "Test",
     };
 
+    /// <summary>Where a unit must stay. The castle plot always; each flag narrows it further.</summary>
+    [Flags]
+    internal enum Contain
+    {
+        Plot = 0,
+        Room = 1,    // the game's room under the spawn spot: a room ends at its walls and doorways
+        Storey = 2,  // within StoreyBand metres of the spawn height: never up or down the stairs
+    }
+
+    /// <summary>A unit's containment: the scope flags, a leash radius (0 = none) and the room it must stay in.</summary>
+    internal readonly record struct Containment(Contain Scope, float Leash, Entity Room)
+    {
+        public override string ToString() =>
+            Scope == Contain.Plot && Leash <= 0 ? "plot"
+            : string.Join(",", new[]
+            {
+                (Scope & Contain.Room) != 0 ? "room" : null,
+                (Scope & Contain.Storey) != 0 ? "storey" : null,
+                Leash > 0 ? Leash.ToString("0", CultureInfo.InvariantCulture) : null,
+            }.Where(x => x != null));
+    }
+
     sealed class Tracked
     {
         public Entity Unit;
@@ -59,7 +83,10 @@ internal sealed class UnitSpawnService
         public string Name;
         public float3 Spot;
         public int Territory;
+        public Entity Heart;
         public ulong By;
+        public Containment Contain;
+        public int Returns;
     }
 
     sealed class Order
@@ -68,9 +95,16 @@ internal sealed class UnitSpawnService
         public string Name;
         public float3 Spot;
         public int Territory;
+        public Entity Heart;
         public ulong By;
         public int Level;
+        public Containment Contain;
     }
+
+    const float StoreyBand = 2.5f;    // metres above or below the spawn height before a Storey unit is out
+    const float LeashSlack = 2f;      // metres past the leash before the hard return (the game's own leash acts first)
+    const float MinLeash = 3f, MaxLeash = 60f;
+    DateTime _nextContain = DateTime.MinValue;
 
     readonly Dictionary<long, Tracked> _ledger = new();
     readonly Queue<Order> _spawnQueue = new();
@@ -144,6 +178,12 @@ internal sealed class UnitSpawnService
             }
         }
 
+        if (_ledger.Count > 0 && DateTime.UtcNow >= _nextContain)
+        {
+            _nextContain = DateTime.UtcNow.AddSeconds(Math.Max(0.2f, Settings.CastleEvents_ContainCheckSeconds.Value));
+            ContainAll();
+        }
+
         budget = Math.Max(1, Settings.CastleEvents_MaxSpawnsPerTick.Value);
         while (budget-- > 0 && _spawnQueue.Count > 0)
         {
@@ -157,8 +197,8 @@ internal sealed class UnitSpawnService
                     continue;
                 }
                 long key = KeyOf(unit);
-                _ledger[key] = new Tracked { Unit = unit, Guid = o.Guid, Name = o.Name, Spot = o.Spot, Territory = o.Territory, By = o.By };
-                Core.Log.LogInfo($"[Uriel UNIT] spawned key={key} prefab={o.Name} {P(o.Spot)} hlevel={TileLayerUtility.GetHeightLevel(o.Spot.y)} territory={o.Territory} tracked={_ledger.Count} queued={_spawnQueue.Count}");
+                _ledger[key] = new Tracked { Unit = unit, Guid = o.Guid, Name = o.Name, Spot = o.Spot, Territory = o.Territory, Heart = o.Heart, By = o.By, Contain = o.Contain };
+                Core.Log.LogInfo($"[Uriel UNIT] spawned key={key} prefab={o.Name} {P(o.Spot)} hlevel={TileLayerUtility.GetHeightLevel(o.Spot.y)} territory={o.Territory} contain={o.Contain} room={RoomId(o.Contain.Room)} tracked={_ledger.Count} queued={_spawnQueue.Count}");
             }
             catch (Exception ex)
             {
@@ -197,10 +237,19 @@ internal sealed class UnitSpawnService
             // Make it fight: never disabled away from players (else DestroyWhenDisabled deletes it within seconds),
             // and its aggro on.
             unit.AddOrSet(new CanPreventDisableWhenNoPlayersInRange { CanDisable = new ModifiableBool(false) });
+            // Home is the spawn spot: the AI walks back there after a fight. With a leash, the game's own chase limit is
+            // the leash too, so the unit gives up and walks home before the hard return in ContainAll has to move it.
             if (unit.TryGetComponent<AggroConsumer>(out var aggro))
             {
                 aggro.Active = new ModifiableBool(true);
+                aggro.PreCombatPosition = o.Spot;
+                if (o.Contain.Leash > 0) aggro.MaxDistanceFromPreCombatPosition = o.Contain.Leash;
                 unit.Write(aggro);
+            }
+            if (unit.TryGetComponent<SpawnTransform>(out var home))
+            {
+                home.Position = o.Spot;
+                unit.Write(home);
             }
             if (o.Level > 0 && unit.TryGetComponent<UnitLevel>(out var lvl))
             {
@@ -301,8 +350,9 @@ internal sealed class UnitSpawnService
 
     /// <summary>Validate and queue <paramref name="count"/> units of a prefab in front of the caller (or at their aim
     /// point). Phase 1 is admin-only; any claimed, alive castle plot.</summary>
-    public bool Enqueue(Entity character, ulong steamId, string prefabArg, int count, int level, bool atAim, out string message)
+    public bool Enqueue(Entity character, ulong steamId, string prefabArg, int count, int level, bool atAim, string containArg, out string message)
     {
+        if (!TryParseContain(containArg, out var contain, out message)) return false;
         if (!TryResolveUnitPrefab(prefabArg, out int guid, out string name, out message)) return false;
 
         if (!character.TryGetComponent<Translation>(out var feet)) { message = "Can't read your position."; return false; }
@@ -319,6 +369,23 @@ internal sealed class UnitSpawnService
         {
             message = "That castle plot is abandoned or decaying.";
             return false;
+        }
+        if (IsBlocked(spot))
+        {
+            message = "That spot is blocked (a wall or an obstacle). Stand in the open, or aim at open floor.";
+            Core.Log.LogInfo($"[Uriel UNIT] refused prefab={name} reason=blocked {P(spot)}");
+            return false;
+        }
+        CastleFloorIndex.Invalidate(heart, territory); // freshly built floors and rooms count at once
+        if ((contain.Scope & Contain.Room) != 0)
+        {
+            if (!CastleFloorIndex.TryFloorAt(heart, spot, out var floor) || floor.Room == Entity.Null)
+            {
+                message = "Room containment needs a castle floor that belongs to a room under the spawn spot.";
+                Core.Log.LogInfo($"[Uriel UNIT] refused prefab={name} reason=no-room {P(spot)}");
+                return false;
+            }
+            contain = contain with { Room = floor.Room };
         }
 
         int max = Math.Max(1, Settings.CastleEvents_MaxUnitsPerCommand.Value);
@@ -345,10 +412,10 @@ internal sealed class UnitSpawnService
                 float angle = i * 2.39996f; // golden angle: an even spread for any count
                 at = new float3(spot.x + math.cos(angle) * SpreadRadius, spot.y, spot.z + math.sin(angle) * SpreadRadius);
             }
-            _spawnQueue.Enqueue(new Order { Guid = guid, Name = name, Spot = at, Territory = territory, By = steamId, Level = level });
+            _spawnQueue.Enqueue(new Order { Guid = guid, Name = name, Spot = at, Territory = territory, Heart = heart, By = steamId, Level = level, Contain = contain });
         }
-        Core.Log.LogInfo($"[Uriel UNIT] queued prefab={name} guid={guid} n={count} {P(spot)} hlevel={TileLayerUtility.GetHeightLevel(spot.y)} territory={territory} level={level} by={steamId}");
-        message = $"Queued {count} x {name}{clamped}.";
+        Core.Log.LogInfo($"[Uriel UNIT] queued prefab={name} guid={guid} n={count} {P(spot)} hlevel={TileLayerUtility.GetHeightLevel(spot.y)} territory={territory} level={level} contain={contain} by={steamId}");
+        message = $"Queued {count} x {name}{clamped}, contained to: {contain}.";
         return true;
     }
 
@@ -513,10 +580,145 @@ internal sealed class UnitSpawnService
                 if (te != Entity.Null) targeting++;
             }
             string lvl = t.Unit.TryGetComponent<UnitLevel>(out var ul) ? ul.Level._Value.ToString(CultureInfo.InvariantCulture) : "-";
-            Core.Log.LogInfo($"[Uriel UNIT] status key={key} prefab={t.Name} {P(at.Value)} hlevel={hl} level={lvl} hp={hp} state={state} target={target} d={F(d)} fromSpawn={F(math.distance(at.Value, t.Spot))} spawnY={F(t.Spot.y)}");
+            Core.Log.LogInfo($"[Uriel UNIT] status key={key} prefab={t.Name} {P(at.Value)} hlevel={hl} level={lvl} hp={hp} state={state} target={target} d={F(d)} fromSpawn={F(math.distance(at.Value, t.Spot))} spawnY={F(t.Spot.y)} contain={t.Contain} returns={t.Returns}");
         }
         Core.Log.LogInfo($"[Uriel UNIT] status n={n} targeting={targeting} radius={F(radius)}");
         return $"{n} unit(s) within {F(radius)} m, {targeting} with a target (details in the server log).";
+    }
+
+    // ============================================================ containment
+
+    /// <summary>"plot" (or empty), "room", "storey" (or "floor"), a leash radius in metres, or a comma mix such as
+    /// "room,15". The plot is always enforced.</summary>
+    static bool TryParseContain(string arg, out Containment contain, out string message)
+    {
+        contain = new Containment(Contain.Plot, 0f, Entity.Null);
+        message = null;
+        if (string.IsNullOrWhiteSpace(arg)) return true;
+        var scope = Contain.Plot;
+        float leash = 0f;
+        foreach (var raw in arg.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            string token = raw.ToLowerInvariant();
+            if (token == "plot") continue;
+            if (token == "room") { scope |= Contain.Room; continue; }
+            if (token is "storey" or "floor") { scope |= Contain.Storey; continue; }
+            if (float.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out float m))
+            {
+                if (m < MinLeash || m > MaxLeash)
+                {
+                    message = $"A leash radius must be {MinLeash:0}-{MaxLeash:0} m.";
+                    return false;
+                }
+                leash = m;
+                continue;
+            }
+            message = $"Unknown containment '{raw}'. Use plot, room, storey, a leash radius in metres, or a mix such as room,15.";
+            return false;
+        }
+        contain = new Containment(scope, leash, Entity.Null);
+        return true;
+    }
+
+    /// <summary>Every tracked unit outside its containment goes back to its spawn spot, and drops its targets on players
+    /// outside that containment so it does not walk straight back out. One log line per return.</summary>
+    void ContainAll()
+    {
+        foreach (var (key, t) in _ledger)
+        {
+            try
+            {
+                if (!t.Unit.Exists() || !t.Unit.TryGetComponent<Translation>(out var pos)) continue;
+                string why = Breach(t, pos.Value);
+                if (why == null) continue;
+                int dropped = DropTargets(t);
+                Move(t.Unit, t.Spot);
+                t.Returns++;
+                Core.Log.LogInfo($"[Uriel UNIT] contain key={key} prefab={t.Name} reason={why} {P(pos.Value)} fromSpawn={F(math.distance(pos.Value.xz, t.Spot.xz))} dy={F(pos.Value.y - t.Spot.y)} dropped={dropped} returns={t.Returns}");
+            }
+            catch (Exception ex)
+            {
+                Core.Log.LogWarning($"[Uriel UNIT] contain failed key={key}: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>Why <paramref name="pos"/> is outside <paramref name="t"/>'s containment, or null when it is inside.</summary>
+    static string Breach(Tracked t, float3 pos)
+    {
+        if (!CastleFloorIndex.InTerritory(t.Territory, pos)) return "plot";
+        var c = t.Contain;
+        if ((c.Scope & Contain.Storey) != 0 && math.abs(pos.y - t.Spot.y) > StoreyBand) return "storey";
+        if (c.Leash > 0 && math.distance(pos.xz, t.Spot.xz) > c.Leash + LeashSlack) return "leash";
+        if ((c.Scope & Contain.Room) != 0)
+        {
+            if (!CastleFloorIndex.TryFloorAt(t.Heart, pos, out var floor)) return "room-nofloor";
+            if (floor.Room != c.Room) return "room";
+        }
+        return null;
+    }
+
+    /// <summary>Removes the unit's AggroBuffer entries on players standing outside its containment. Entries on NPCs and
+    /// on players inside stay. Our own units only (Nyarlathotep's safety rule).</summary>
+    static int DropTargets(Tracked t)
+    {
+        if (!Core.EntityManager.HasBuffer<AggroBuffer>(t.Unit)) return 0;
+        var buffer = Core.EntityManager.GetBuffer<AggroBuffer>(t.Unit);
+        int n = 0;
+        for (int i = buffer.Length - 1; i >= 0; i--)
+        {
+            var e = buffer[i].Entity;
+            if (!e.Exists() || !e.Has<PlayerCharacter>() || !e.TryGetComponent<Translation>(out var at)) continue;
+            if (Breach(t, at.Value) == null) continue;
+            buffer.RemoveAt(i);
+            n++;
+        }
+        return n;
+    }
+
+    /// <summary>Moves one of our units at once (Nyarlathotep's SpawnTracker.Move): Translation and LastTranslation, its
+    /// return point (AggroConsumer.PreCombatPosition, SpawnTransform.Position), its path emptied and velocity zeroed so it
+    /// does not keep walking the old path.</summary>
+    static void Move(Entity unit, float3 to)
+    {
+        unit.Write(new Translation { Value = to });
+        if (unit.Has<LastTranslation>()) unit.Write(new LastTranslation { Value = to });
+        if (unit.TryGetComponent<AggroConsumer>(out var aggro))
+        {
+            aggro.PreCombatPosition = to;
+            unit.Write(aggro);
+        }
+        if (unit.TryGetComponent<SpawnTransform>(out var home))
+        {
+            home.Position = to;
+            unit.Write(home);
+        }
+        if (Core.EntityManager.HasBuffer<PathBuffer>(unit)) Core.EntityManager.GetBuffer<PathBuffer>(unit).Clear();
+        if (unit.Has<Velocity>()) unit.Write(new Velocity());
+    }
+
+    /// <summary>A spawn spot inside a wall or obstacle at its own height level. False when the tile world can't be read
+    /// (the spawn is then allowed, as before).</summary>
+    static bool IsBlocked(float3 spot)
+    {
+        if (LiveTileWorld() is not { } world || !world.ChunkAllocation.IsCreated || !world.WorldCells.IsCreated || world.WorldCells.Length == 0)
+            return false;
+        var polygons = TileCollisionHelper.CreateLinePolygon();
+        try
+        {
+            var map = TileCollisionHelper.CreateMapData(polygons, world);
+            return TileMapCollisionMath.CheckStaticCircle(ref map, new float2(spot.x, spot.z), TileLayerUtility.GetHeightLevel(spot.y), 0.4f, MapCollisionFlags.CollideNormalMovement);
+        }
+        finally { polygons.Dispose(); }
+    }
+
+    static string RoomId(Entity room) => room == Entity.Null ? "-" : room.Index.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>" enclosed=… missingWalls=… roof=…" for a room entity, for the probe line.</summary>
+    static string RoomInfo(Entity room)
+    {
+        if (room == Entity.Null || !room.TryGetComponent<CastleRoom>(out var r)) return "";
+        return $" enclosed={r.IsEnclosedRoom} missingWalls={r.IsMissingWalls} roof={r.HasRoof}";
     }
 
     // ============================================================ tile-map probe (spike 1)
@@ -555,9 +757,17 @@ internal sealed class UnitSpawnService
             }
         }
         finally { polygons.Dispose(); }
-        bool plot = Core.ObjectSpawn.TryResolvePlot(at, out _, out int territory);
-        Core.Log.LogInfo($"[Uriel PROBE] label={label} {P(at)} hlevel={level} plot={(plot ? territory : -1)}{sb}");
-        return $"probe {label}: hlevel={level}{sb}";
+        bool plot = Core.ObjectSpawn.TryResolvePlot(at, out Entity heart, out int territory);
+        string floorInfo = " floor=none";
+        if (plot)
+        {
+            CastleFloorIndex.Invalidate(heart, territory);
+            if (CastleFloorIndex.TryFloorAt(heart, at, out var fl))
+                floorInfo = $" floor=({F(fl.Position.x)},{F(fl.Position.y)},{F(fl.Position.z)}) room={RoomId(fl.Room)}{RoomInfo(fl.Room)}";
+            floorInfo += $" castleFloors={CastleFloorIndex.FloorCount(heart)}";
+        }
+        Core.Log.LogInfo($"[Uriel PROBE] label={label} {P(at)} hlevel={level} plot={(plot ? territory : -1)}{sb}{floorInfo}");
+        return $"probe {label}: hlevel={level}{sb}{floorInfo}";
     }
 
     /// <summary>Spike 1 map: samples a square grid (1 m steps) around the caller at their height level and the one
@@ -601,6 +811,93 @@ internal sealed class UnitSpawnService
         }
         finally { polygons.Dispose(); }
         return $"probemap {label}: level {level} and {level + 1} written to the server log.";
+    }
+
+    /// <summary>Containment survey: every room of the castle the caller stands in (floor tiles, storey heights, the
+    /// game's enclosed / missing-walls / roof flags), and per storey a map of the plot's 5 m blocks: a letter per room,
+    /// '.' a block of the territory without a floor, ' ' outside the territory, '@' the caller. North is up.</summary>
+    public string Rooms(Entity character)
+    {
+        if (!character.TryGetComponent<Translation>(out var me)) return "Can't read your position.";
+        if (!Core.ObjectSpawn.TryResolvePlot(me.Value, out Entity heart, out int territory)) return "You're not standing in a castle plot.";
+        CastleFloorIndex.Invalidate(heart, territory);
+        var floors = CastleFloorIndex.All(heart).ToList();
+        var rooms = floors.GroupBy(f => f.Room).OrderByDescending(g => g.Count()).ToList();
+        var letter = new Dictionary<Entity, char>();
+        for (int i = 0; i < rooms.Count; i++) letter[rooms[i].Key] = rooms[i].Key == Entity.Null ? '?' : (char)(i < 26 ? 'A' + i : 'a' + (i - 26) % 26);
+        foreach (var g in rooms)
+        {
+            var ys = string.Join("/", g.Select(f => F(f.Position.y)).Distinct().OrderBy(y => y));
+            Core.Log.LogInfo($"[Uriel ROOMS] room={letter[g.Key]} id={RoomId(g.Key)} floors={g.Count()} y={ys}{RoomInfo(g.Key)} x={F(g.Min(f => f.Position.x))}..{F(g.Max(f => f.Position.x))} z={F(g.Min(f => f.Position.z))}..{F(g.Max(f => f.Position.z))}");
+        }
+
+        var blocks = ObjectSpawnService.TerritoryBlocks(territory);
+        var self = ObjectSpawnService.ConvertPosToBlockCoord(me.Value);
+        int minX = blocks.Min(b => b.x), maxX = blocks.Max(b => b.x), minZ = blocks.Min(b => b.y), maxZ = blocks.Max(b => b.y);
+        foreach (var storey in floors.Select(f => (float)Math.Round(f.Position.y, 1)).Distinct().OrderBy(y => y))
+        {
+            var at = floors.Where(f => Math.Abs(f.Position.y - storey) < 0.2f)
+                .GroupBy(f => ObjectSpawnService.ConvertPosToBlockCoord(f.Position)).ToDictionary(g => g.Key, g => g.First());
+            Core.Log.LogInfo($"[Uriel ROOMS] map territory={territory} y={F(storey)} blocks={blocks.Count} floors={at.Count} cell=5m north=up");
+            for (int z = maxZ; z >= minZ; z--)
+            {
+                var row = new StringBuilder(maxX - minX + 1);
+                for (int x = minX; x <= maxX; x++)
+                {
+                    var b = new int2(x, z);
+                    row.Append(b.Equals(self) ? '@' : at.TryGetValue(b, out var f) ? letter[f.Room] : blocks.Contains(b) ? '.' : ' ');
+                }
+                Core.Log.LogInfo($"[Uriel ROOMS] row y={F(storey)} bz={z.ToString(CultureInfo.InvariantCulture).PadLeft(5)} |{row}|");
+            }
+        }
+        int doors = LogDoorways(heart, floors, letter);
+        Core.Log.LogInfo($"[Uriel ROOMS] end territory={territory} rooms={rooms.Count} floors={floors.Count} doorways={doors}");
+        return $"{rooms.Count} room(s), {floors.Count} floor tile(s) on plot {territory} (details in the server log).";
+    }
+
+    /// <summary>Doors, gates and wall entrances of the castle: one line each with its position and the rooms of the floor
+    /// tiles on either side (the nearest floor north/south or east/west of it, 2.5 m away), so a test knows where a unit
+    /// can pass from one room into the next.</summary>
+    static int LogDoorways(Entity heart, List<CastleFloorIndex.Floor> floors, Dictionary<Entity, char> letter)
+    {
+        int n = 0;
+        var query = Core.EntityManager.CreateEntityQuery(new EntityQueryDesc
+        {
+            All = new[] { ComponentType.ReadOnly(Il2CppType.Of<CastleHeartConnection>()), ComponentType.ReadOnly(Il2CppType.Of<Translation>()), ComponentType.ReadOnly(Il2CppType.Of<PrefabGUID>()) },
+        });
+        try
+        {
+            var entities = query.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (var e in entities)
+                {
+                    if (e.Read<CastleHeartConnection>().CastleHeartEntity.GetEntityOnServer() != heart) continue;
+                    string name = e.Read<PrefabGUID>().GetPrefabName() ?? "";
+                    // A Door component, or a wall piece with an opening ("..._Entrance", "..._EntranceWide_Left"); never a
+                    // floor ("Floor_Outdoor" holds "door").
+                    bool door = e.Has<Door>();
+                    if (e.Has<CastleFloor>() || (!door && name.IndexOf("_Wall_", StringComparison.Ordinal) < 0)) continue;
+                    if (!door && name.IndexOf("Entrance", StringComparison.OrdinalIgnoreCase) < 0 && name.IndexOf("Gate", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    var p = e.Read<Translation>().Value;
+                    string Side(float dx, float dz)
+                    {
+                        var q = new float3(p.x + dx, p.y, p.z + dz);
+                        var b = ObjectSpawnService.ConvertPosToBlockCoord(q);
+                        foreach (var f in floors)
+                            if (ObjectSpawnService.ConvertPosToBlockCoord(f.Position).Equals(b) && math.abs(f.Position.y - p.y) < 2f)
+                                return letter.TryGetValue(f.Room, out var c) ? c.ToString() : "?";
+                        return "-";
+                    }
+                    string state = door && e.TryGetComponent<Door>(out var d) ? $" open={d.OpenState}" : "";
+                    Core.Log.LogInfo($"[Uriel ROOMS] doorway prefab={name}{state} {P(p)} n={Side(0, 2.5f)} s={Side(0, -2.5f)} e={Side(2.5f, 0)} w={Side(-2.5f, 0)}");
+                    n++;
+                }
+            }
+            finally { entities.Dispose(); }
+        }
+        finally { query.Dispose(); }
+        return n;
     }
 
     /// <summary>The TileWorld singleton lives on a system entity a default query leaves out.</summary>

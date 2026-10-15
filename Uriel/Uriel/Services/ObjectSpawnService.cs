@@ -501,7 +501,7 @@ internal sealed class ObjectSpawnService
         return heart.Exists();
     }
 
-    static int2 ConvertPosToBlockCoord(float3 pos)
+    internal static int2 ConvertPosToBlockCoord(float3 pos)
     {
         int gridX = (int)math.floor(pos.x * 2) + TileGridOffset;
         int gridZ = (int)math.floor(pos.z * 2) + TileGridOffset;
@@ -562,6 +562,31 @@ internal sealed class ObjectSpawnService
         }
         finally { entities.Dispose(); }
         return -1;
+    }
+
+    /// <summary>The 5 m blocks of one territory (Castle Events containment caches them, so its per-second check is a set
+    /// lookup instead of <see cref="GetTerritoryIndex"/>'s query). Empty when the territory is unknown.</summary>
+    internal static HashSet<int2> TerritoryBlocks(int territoryIndex)
+    {
+        var result = new HashSet<int2>();
+        var builder = new EntityQueryBuilder(Allocator.Temp)
+            .AddAll(new(Il2CppType.Of<CastleTerritory>(), ComponentType.AccessMode.ReadOnly))
+            .WithOptions(EntityQueryOptions.IncludeDisabled | EntityQueryOptions.IncludeSpawnTag);
+        var query = Core.EntityManager.CreateEntityQuery(ref builder);
+        var entities = query.ToEntityArray(Allocator.Temp);
+        try
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var te = entities[i];
+                if (!te.TryGetComponent<CastleTerritory>(out var ct) || ct.CastleTerritoryIndex != territoryIndex) continue;
+                if (!Core.EntityManager.HasComponent<CastleTerritoryBlocks>(te)) continue;
+                var blocks = Core.EntityManager.GetBuffer<CastleTerritoryBlocks>(te);
+                for (int b = 0; b < blocks.Length; b++) result.Add(blocks[b].BlockCoordinate);
+            }
+        }
+        finally { entities.Dispose(); }
+        return result;
     }
 
     Entity GetHeartForTerritory(int territoryIndex)

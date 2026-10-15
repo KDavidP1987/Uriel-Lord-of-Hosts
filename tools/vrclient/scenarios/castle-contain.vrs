@@ -1,0 +1,128 @@
+# castle-contain.vrs: Castle Events containment: plot, leash and room. Spawns are refused outside a castle plot and on
+# a blocked spot; units chasing Chaos off the plot, or out of their room, are returned to their spawn spot; a leashed
+# unit stays near its spawn spot. Each scope has a control run without it.
+# Coordinates are Chaos's plot (territory 11), surveyed by floor-survey.vrs: courtyard room A spans x -2040..-1970,
+# its south edge is z -1745 at x -2000..-1985 (nothing of the plot south of that).
+# Needs: CastleEvents.Enabled=true; Chaos vulnerable (units never target an invulnerable admin).
+ensure
+console TPHome
+wait 3
+mark
+chat .uriel unit list
+expect-reply No Uriel units
+# --- refused outside any plot: 15 m south of the plot's south edge
+chat .devtp -1992.5 -1760
+wait 3
+chat .uriel unit spawn CHAR_Bandit_Thug
+expect-reply Units can only be spawned inside a castle plot
+# --- bad containment words are refused before anything spawns
+console TPHome
+wait 3
+chat .uriel unit spawn CHAR_Bandit_Thug 1 0 here sideways
+expect-reply Unknown containment 'sideways'
+chat .uriel unit spawn CHAR_Bandit_Thug 1 0 here 500
+expect-reply A leash radius must be
+# --- plot: two thugs at the courtyard's west edge (plot edge x -2040; level ground continues west, y 5) chase Chaos
+# 12 m off the plot and are returned to their spawn spot at the edge. (The south edge is a 30 m cliff: no path.)
+chat .devtp -2034 -1720
+wait 3
+chat .uriel unit spawn CHAR_Bandit_Thug 2
+expect-reply contained to: plot
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug .*contain=plot .*tracked=2
+wait 4
+chat .devtp -2052 -1720
+expect-log \[Uriel UNIT\] contain key=\d+ prefab=CHAR_Bandit_Thug reason=plot timeout=30
+wait 3
+shot full castle-contain-plot
+chat .uriel unit status 40
+expect-log \[Uriel UNIT\] status n=2
+chat .devtp -2034 -1720
+wait 2
+chat .uriel unit clear
+expect-reply Removing 2 unit(s) on this plot
+wait 3
+# --- leash control: no leash; Chaos steps 12 m east and the thugs follow him (within 10 m of him after 8 s)
+console TPHome
+wait 3
+chat .uriel unit spawn CHAR_Bandit_Thug 2
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug .*tracked=2
+wait 4
+chat .devtp -1991.5 -1715
+wait 8
+chat .uriel unit status 40
+expect-log \[Uriel UNIT\] status key=\d+ prefab=CHAR_Bandit_Thug .* d=\d\.\d fromSpawn=
+chat .uriel unit clear
+expect-reply Removing 2 unit(s) on this plot
+wait 3
+# --- leash 6 m: the same with a 6 m leash; they stay within 10 m of their spawn spot
+console TPHome
+wait 3
+chat .uriel unit spawn CHAR_Bandit_Thug 2 0 here 6
+expect-reply contained to: 6
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug .*contain=6 .*tracked=2
+wait 4
+chat .devtp -1991.5 -1715
+wait 12
+shot full castle-contain-leash
+chat .uriel unit status 40
+expect-log \[Uriel UNIT\] status key=\d+ prefab=CHAR_Bandit_Thug .*fromSpawn=\d\.\d .*contain=6
+expect-log \[Uriel UNIT\] status key=\d+ prefab=CHAR_Bandit_Thug .*fromSpawn=\d\.\d .*contain=6
+chat .uriel unit clear
+expect-reply Removing 2 unit(s) on this plot
+wait 3
+chat .uriel unit list
+expect-reply No Uriel units
+# --- room: two thugs spawned in the middle of room D, contained to it, follow Chaos to the open entrance into hall
+# B (x -2025, z -1685..-1680); Chaos steps 8 m into B; they are returned when they step onto B's floor
+chat .devtp -2032.5 -1675
+wait 3
+chat .uriel unit spawn CHAR_Bandit_Thug 2 0 here room
+expect-reply contained to: room
+expect-log \[Uriel UNIT\] spawned key=\d+ prefab=CHAR_Bandit_Thug .*contain=room room=\d+ .*tracked=2
+wait 3
+chat .devtp -2028 -1681
+wait 4
+chat .devtp -2017 -1682.5
+expect-log \[Uriel UNIT\] contain key=\d+ prefab=CHAR_Bandit_Thug reason=room timeout=30
+wait 6
+shot full castle-contain-room
+chat .uriel unit status 40
+expect-log \[Uriel UNIT\] status n=2
+chat .uriel unit clear
+expect-reply Removing 2 unit(s) on this plot
+wait 3
+# --- room control: the same with plot only; they follow Chaos through the entrance and are never returned
+chat .devtp -2032.5 -1675
+wait 3
+chat .uriel unit spawn CHAR_Bandit_Thug 2
+expect-reply contained to: plot
+wait 3
+chat .devtp -2028 -1681
+wait 4
+mark
+chat .devtp -2017 -1682.5
+wait 12
+expect-no-log \[Uriel UNIT\] contain key= timeout=2
+chat .uriel unit status 40
+expect-log \[Uriel UNIT\] status key=\d+ prefab=CHAR_Bandit_Thug .* d=\d\.\d fromSpawn=
+chat .uriel unit clear
+expect-reply Removing 2 unit(s) on this plot
+wait 3
+# --- observation (no check): can units get through a closed castle door? Two thugs in room E between the two
+# closed wide doors; Chaos waits in courtyard A south of the wood door (x -2030, z -1710). The status lines show
+# whether any reached A (z below -1710).
+chat .devtp -2030 -1703
+wait 3
+chat .uriel unit spawn CHAR_Bandit_Thug 2
+wait 4
+chat .devtp -2030 -1716
+wait 12
+shot full castle-contain-door
+chat .uriel unit status 40
+expect-log \[Uriel UNIT\] status n=2
+chat .uriel unit clear
+expect-reply Removing 2 unit(s) on this plot
+wait 3
+chat .uriel unit list
+expect-reply No Uriel units
+console TPHome

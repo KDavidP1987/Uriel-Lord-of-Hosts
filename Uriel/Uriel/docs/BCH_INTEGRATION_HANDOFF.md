@@ -393,11 +393,17 @@ meant for a Raphael UI: they will get wire lines and a section here when they la
 
 | Command | Reply starts with |
 |---|---|
-| `.uriel unit spawn <name\|guid> [count] [level] [here\|aim]` | `Queued N x <prefab>` / refusal text |
+| `.uriel unit spawn <name\|guid> [count] [level] [here\|aim] [plot\|room\|storey\|<m>]` | `Queued N x <prefab>, contained to: <scope>.` / refusal text |
 | `.uriel unit list` | `Uriel units: …` or `No Uriel units.` |
 | `.uriel unit despawn [radius]` / `clear` | `Removing …` |
 | `.uriel unit purge [confirm]` | arm text / `Purging N unit(s)` |
-| `.uriel unit status [radius]` / `probe` / `probemap` | diagnostics (details go to the server log) |
+| `.uriel unit status [radius]` / `probe` / `probemap` / `rooms` | diagnostics (details go to the server log) |
+
+Containment (added 2026-10-15): every unit stays on its castle plot; the optional last `spawn` argument narrows that
+to the game's room under the spawn spot (`room`), its storey (`storey`), a leash radius in metres (3-60), or a comma
+mix (`room,15`). The word appears back in the reply after `contained to:`. New config key
+`[CastleEvents] ContainCheckSeconds` (float, default 1). A future spawn-point UI will want a containment picker
+with these same words.
 
 ## 7. Change discipline (the living-contract rule)
 

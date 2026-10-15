@@ -1,0 +1,16 @@
+# floor-survey.vrs: Castle Events containment, step 1. Reads the built castle at Chaos's home: the floor tile and the
+# game's room under him, and an ASCII tile map (walls '#'). Compared with the screenshot by hand.
+# Needs: CastleEvents.Enabled=true; TPHome lands inside Chaos's castle.
+ensure
+console TPHome
+wait 3
+mark
+chat .devwhere
+chat .uriel unit probe home
+expect-log \[Uriel PROBE\] label=home .*castleFloors=\d+
+chat .uriel unit probemap home 20
+expect-log \[Uriel PROBE\] map-end label=home level=\d+ blocked=\d+
+expect-log \[Uriel PROBE\] map-end label=home level=\d+ blocked=\d+
+chat .uriel unit rooms
+expect-log \[Uriel ROOMS\] end territory=\d+ rooms=\d+
+shot full floor-survey-home
