@@ -11,7 +11,7 @@ namespace Uriel.Commands;
 [CommandGroup("uriel")]
 internal static class HelpCommands
 {
-    [Command("help", description: "Uriel help menu. Usage: .uriel help [objects|storage|stairs|admin]")]
+    [Command("help", description: "Uriel help menu. Usage: .uriel help [objects|storage|stairs|events|admin]")]
     public static void Help(ChatCommandContext ctx, string topic = null)
     {
         switch (topic?.Trim().ToLowerInvariant())
@@ -22,6 +22,7 @@ internal static class HelpCommands
                     "  .uriel help objects  - spawn & collect world objects for your castle\n" +
                     "  .uriel help storage  - share chests/stashes with other players\n" +
                     "  .uriel help stairs   - restyle placed stairs without rebuilding\n" +
+                    "  .uriel help events   - castle events: spawn foes, gate doors (alpha)\n" +
                     "  .uriel help admin    - admin-only controls");
                 break;
 
@@ -52,6 +53,21 @@ internal static class HelpCommands
                     "  .uriel removestairs - remove the staircase cleanly");
                 break;
 
+            case "events" or "event" or "castle" or "units":
+                ctx.Reply(
+                    "EVENTS (alpha) - turn your castle into an event space:\n" +
+                    "  .uriel event marker <group> [mob|boss] - a spawn spot where you stand\n" +
+                    "  .uriel event door <group> - that group's door stays shut until it falls\n" +
+                    "  .uriel event list | remove <#id|group> - the layout\n" +
+                    "  .uriel event start [template] [options] | stop | status | history");
+                ctx.Reply(
+                    "EVENTS - what spawns (squad -> floor template -> template):\n" +
+                    "  .uriel squad create|add|extend|remove|weight|show|list|delete\n" +
+                    "  .uriel floor create|assign|show|list|delete\n" +
+                    "  .uriel template create|floor|options|show|list|delete\n" +
+                    "  options: easy|hard|brutal, level=N, auto, hp*2, dmg*1.5, speed*1.2, limit=15m");
+                break;
+
             case "admin" or "admins":
                 ctx.Reply(
                     "ADMIN - objects (admin-only):\n" +
@@ -66,11 +82,12 @@ internal static class HelpCommands
                     "ADMIN - storage/stairs/tools (admin-only):\n" +
                     "  .uriel unshareall | unshareplayer <name> | sharedall | sharedebug\n" +
                     "  .uriel stairpurge | stairrefresh (experimental)\n" +
+                    "  .uriel unit spawn|list|kill|despawn|clear|purge - castle event units\n" +
                     "  .uriel api version|catalog|unlocked - machine API for Raphael");
                 break;
 
             default:
-                ctx.Reply($"Unknown help topic '{topic}'. Try: .uriel help objects | storage | stairs | admin");
+                ctx.Reply($"Unknown help topic '{topic}'. Try: .uriel help objects | storage | stairs | events | admin");
                 break;
         }
     }

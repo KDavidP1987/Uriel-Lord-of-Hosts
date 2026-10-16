@@ -1,6 +1,11 @@
 # Castle Events — spawn units, bosses, objects and gates into a castle
 
-**Status:** PLANNED (2026-10-15). No code yet. Phase 0 (indoor spikes) and Phase 1 (unit spawner) are next.
+**Status:** ALPHA, released in v0.21.0 (2026-10-15), off by default. Built: unit spawner, containment, layouts,
+door gates, layered templates with random rolls, run scaling, timer and history (sections "… as built" below).
+Open, per [`docs/ROADMAP.md`](../ROADMAP.md) milestones 2-3: second-player and multiplayer tests, spikes 4-6, the
+plot-edge containment retest, the `[URIEL:*]` wire API and Raphael screens
+([handoff](../../Uriel/Uriel/docs/RAPHAEL_CASTLE_EVENTS_HANDOFF.md)), then the toll door, entry trigger and
+capacity, rewards, event objects and maze stairs.
 
 **Sources:** the owner's vision (2026-10-15, below) and Nyarlathotep's lessons file
 `..\Nyarlathotep Lord of Chaos\docs\lessons\SPAWNING_LESSONS_FOR_URIEL.md` (cited as "lessons §N"). That file's marks

@@ -8,6 +8,105 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.21.0] - 2026-10-15
+
+**Castle Events (alpha).** A new feature group that turns a castle into an event space: spawned mobs and
+bosses, doors gated on their defeat, layered templates with random rolls, per-run scaling, a timer and run
+history. Off by default (`[CastleEvents] Enabled = false`). Design and test record:
+[`docs/features/CASTLE_EVENTS.md`](docs/features/CASTLE_EVENTS.md). Tested in game by the vrclient loop on
+the local dev server (single player); the player path and multiplayer are not yet tested.
+
+### Added — unit spawner (admin)
+
+- `UnitSpawnService`: spawns NPC units into a claimed, alive castle plot with the recipe from Nyarlathotep's
+  spawning lessons: Uriel's own marker buff, a `LifeTime` backstop (`UnitLifetimeSeconds`, default 3600),
+  `CanPreventDisableWhenNoPlayersInRange` off so units stay active with no player near, aggro on, home set to
+  the spawn spot, optional level, loot cleared (`ClearDrops`).
+- Budgeted spawn and despawn queues (`MaxSpawnsPerTick`, `MaxDespawnsPerTick`), caps per command, per plot and
+  per server (`MaxUnitsPerCommand` 10, `MaxUnitsPerPlot` 60, `MaxTrackedUnits` 300), a refused-prefab list
+  (player characters, non-fighting prefabs, units that drop into an inventory), and a boot sweep that removes
+  every marked unit (units are never saved).
+- Commands: `.uriel unit spawn <name|guid> [count] [level] [here|aim] [contain]`, `list`, `kill [radius]
+  [all|boss|mob]`, `despawn [radius]`, `clear`, `purge [confirm]` (two-step kill switch), and diagnostics
+  `status`, `probe`, `probemap`, `rooms`, `door`.
+- Unit names resolve exactly, by a unique substring, or by a unique ending (`Foreman_VBlood`). Units that are
+  missing from the game's spawnable-name list (`CHAR_Undead_SkeletonSoldier_Base`, `..._SkeletonCrossbow_Base`)
+  resolve through every prefab's name.
+
+### Added — containment
+
+- Every unit stays on its castle plot. Optional narrower scopes per spawn: `room` (the game's own castle room
+  under the spawn spot, from `CastleFloor` → `CastleRoomConnection`), `storey` (its floor level), a leash radius
+  in metres (3-60), or a mix (`room,15`). A unit outside its scope is returned to its spawn spot; checked every
+  `ContainCheckSeconds` (default 1). With a leash the game's own chase limit is set to it too.
+- `CastleFloorIndex` maps a plot's floors to rooms and storeys. Castle floors and doors far from players are
+  Disabled (`DisableWhenNoPlayersInRange`), so its queries use `IncludeDisabled | IncludeSpawnTag`.
+
+### Added — event layouts, door gates and runs
+
+- Layout per castle plot: **groups**, each on a floor (counted from the castle's own floor heights), with spawn
+  **markers** (`mob` or `boss`, optional own unit, count, level, containment) and optionally one **door**.
+  `.uriel event marker | door | undoor | squad | remove | list`.
+- `CastleDoors`: finds, opens, closes, locks and unlocks real castle doors from the server (`Door.OpenState` and
+  `Interactable.Disabled`; spike 7). A run shuts and locks each group's door and opens it when the group is
+  defeated; a door forced open is shut again; stop and restart put every door back as it was (held doors are
+  saved and released with a retry loop until found).
+- `.uriel event start [template|-] [options]`, `stop`, `status`, `history`. Everything resolves and fits the
+  caps before anything spawns or is charged.
+- Players: `PlayerEvents` (default off) lets castle owners (team match, so clan members) run events on their
+  own plot. `MaxMarkersPerPlot` (40), marker costs (`MarkerCostItem`, `MarkerCostAmount`,
+  `BossMarkerCostAmount`, refunded on removal) and a run cost (`RunCostItem`, `RunCostAmount`); all free by
+  default. `DefaultContain` (default `storey`).
+- Persistence: `BepInEx/config/Uriel/castle_events.json` (schema 2: layouts, squads, floor templates,
+  templates, history, held doors), saved on change and on unload.
+
+### Added — layers and random rolls
+
+- **Squad**: one or more sets (combinations; one is rolled per run by weight) of entries
+  `<mob|boss> <units> <count> <any|distinct> [level]`. `any` = an assortment with repeats; `distinct` = that
+  many different units. `.uriel squad create | add | extend | remove | weight | show | list | delete`.
+- **Floor template**: layout group (or `*`) → squads, one rolled per run. `.uriel floor create | assign |
+  show | list | delete`.
+- **Template**: floor (`1`, `2`, … or `*`) → floor templates, one rolled per floor per run, plus default run
+  options. `.uriel template create | floor | options | show | list | delete`. Replaces the flat
+  `template set` from the first build of this release.
+- A run started with a floor template or a squad uses it on every floor or group. An admin's library entries
+  are server-wide; a player's are their own.
+
+### Added — run options, scaling, timer
+
+- `UnitScaling`: `level=N`, `level+N`, `auto[+N]` (the highest player level on the plot, from
+  `Equipment.GetFullLevel`) write `UnitLevel`; `hp`, `dmg` (= `pp` + `sp`), `speed`, `aspd` multipliers
+  (0.1-10) are `ModifyUnitStatBuff_DOTS` entries (`MultiplyBaseAdd`) on the marker buff, Nyarlathotep's
+  method. Presets `easy`, `normal`, `hard`, `brutal`. Template options first, then the start's.
+- One faction per run by default: every unit takes the `FactionReference` and `Team` of the run's first boss
+  (else its first unit). In testing a beast V Blood killed undead mobs on the same floor. `faction=keep`
+  opts out.
+- Clock from the moment every unit is in place; group clears, all bosses down and completion are timed,
+  logged and announced. `limit=` (max 6 h) warns at 60 and 10 s, then fails the run. The last 100 runs are
+  kept; `.uriel event history` shows the last 5 and the best times per template.
+
+### Added — help and logs
+
+- `.uriel help events` (and the unit commands under `.uriel help admin`).
+- Greppable log lines for every state change: `[Uriel UNIT] …`, `[Uriel EVENT] …`, `[Uriel DOOR] …`.
+
+### Testing
+
+- New in-game test loop adopted from Nyarlathotep: `tools/devserver.ps1` (stop, deploy, start, verify) and
+  `tools/vrclient/` (drives the real client). Scenarios: `unit-spawner` 23/23, `castle-contain` 29/31 (the
+  two plot-edge checks need a new edge since the owner fenced it), `storey-contain` 24/24, `door-control`
+  15/15, `castle-event` 44/44, `event-layers` 37/37, `event-scaling` 25/25.
+- Scaling measured on a level 40 thug: health 99.4 → 198.7 (`hp*2`), power 26.6 → 39.9 (`dmg*1.5`),
+  move speed 3.2 → 3.8 (`speed*1.2`), attack speed 1.0 → 1.3 (`aspd*1.3`).
+
+### Known limits
+
+- Single-player tested only: refusal on another player's castle, the player cost path and multiplayer runs
+  need a second player.
+- No `[URIEL:*]` wire lines for events yet; Raphael can relay the commands and show their text replies.
+- A chat line is cut at about 120 characters; long unit lists go in parts (`.uriel squad extend`).
+
 ## [0.20.0] - 2026-07-11
 
 Object Spawning: live-tester feedback pass — hazard/exploit + container blacklist, flush-to-ground

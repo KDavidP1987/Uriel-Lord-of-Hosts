@@ -1,61 +1,94 @@
 # Uriel — Roadmap
 
-Uriel is an **umbrella mod**: a *host* of small, independently toggleable
-server-side sub-mods that grow over time. This is a **living, aspirational
-list** — there are no timelines or guarantees, priorities are driven by tester
-feedback, and large-scope ideas may change shape or not happen at all.
+Uriel is an **umbrella mod**: a *host* of small, independently toggleable server-side features. This page
+lists what has shipped, how mature each part is, and what remains before 1.0. Priorities follow tester
+feedback; nothing here is a promise or a date.
 
-Have an idea or a vote? Bring it to **[The Shadow Realm Discord](https://discord.gg/usC9QgBrXK)**.
+Ideas and votes: **[The Shadow Realm Discord](https://discord.gg/usC9QgBrXK)**.
 
----
+## Maturity
 
-## ✅ Shipped
+| Stage | Meaning |
+|---|---|
+| **Alpha** | Built and tested by the developer on a dev server. Expect rough edges; commands and config may change. Off by default. |
+| **Beta** | In testers' hands. Core paths validated live; edge cases and broader validation still open. |
+| **Stable** | Validated on a live production server; commands and config keys frozen. The bar for 1.0. |
 
-1. **Stair editing** — live restyle (destroy + respawn; same-shape cosmetics,
-   per-user DLC gating) and `.uriel removestairs` clean delete. *(v0.14.0)*
-2. **Public storage** — per-container sharing of chests and prison cells, with
-   permissions (take/give), per-player withdrawal limits, and per-stack access
-   costs paid to a designated pay chest.
+## Where each feature stands (v0.21.0)
 
-## 🔜 Planned next (near-term sub-mods)
+| Feature | Stage | Since | Still open |
+|---|---|---|---|
+| Object Spawning | Beta | 0.15.0 | Live validation of abandon cleanup, spawn conditions and boss-kill unlocks; more server-lag work on move/rotate/delete; the block list keeps growing as testers report objects |
+| Public Storage (chests) | Beta | 0.2.0 | Broader validation of withdrawal limits and access costs |
+| Public prison cells | Beta | 0.5.0 | Broader validation of `.uriel takeprisoner` |
+| Stair Editing | Beta | 0.7.0 | Edge cases (attachments, decay, pathing); an open report of a clan ownership issue with swapped stairs |
+| Castle Events | **Alpha** | 0.21.0 | See milestones 2 and 3 |
 
-3. **Coffin sharing** — publicly share a coffin's use, with an optional
-   **cost-to-use** modifier (same cost model as storage).
-4. **Conditional door access** — share a door under conditions: **payment**
-   and/or **allowed time windows** (specific hours of the day).
-5. **Bulk storage sharing** — share **all heart-linked storage at a location**
-   in one action (optionally with shared conditions), **automatically excluding**
-   the designated pay chest and any chests the owner has marked private. For
-   owners who want to open their whole castle's storage at once.
+## Road to 1.0
 
-*(More near-term items will land here as they're scoped — suggestions welcome.)*
+### Milestone 1 — Harden the beta features
 
-## 🔭 Large-scope / exploratory ideas
+- Run Object Spawning, Public Storage and Stair Editing on a live production server and fix what it finds.
+- Reduce server cost of repeated move / rotate / delete (in-place rotate, a short-lived index cache).
+- Resolve the swapped-stairs clan ownership report once a reproduction is available.
 
-Bigger, ambitious concepts under consideration. These are exploratory — listed
-so the direction is visible, **not** committed features.
+### Milestone 2 — Castle Events to beta
 
-- **Plot expansion via phase gate** — a phase gate on a plot that leads to a
-  **separate server instance** of the map, expanding where players can build.
-- **Plot expansion via map copy/paste** — alternatively, copy/paste a section of
-  the map to add buildable plots **within the current map** structure.
-- **PvP Arena boss mode** — option to spawn **1–3 V Blood bosses** to fight; on
-  victory, award prizes from a **configurable drop table** with win criteria
-  (e.g. *bosses × level → weighted chance at a given item tier*).
-- **Area access gating** — let a set number of players **pay for entry** and cap
-  how many can be inside an area until they leave; for mazes and run-through
-  castle challenges.
-- **Door & teleport controls** — doors that unlock on a **schedule** or for a
-  **cost**, and teleporters that send players to **specific map coordinates**.
-- **Expanded castle decor** — make additional in-game assets usable as castle
-  decorations.
-- **Triggered NPC spawns** — spawn NPCs on a **respawn timer** or **triggered by
-  entry**. Example: a pay-to-enter challenge base — the player pays at the door,
-  which respawns the mobs inside as it opens, then teleports them in.
-- **Basement levels** — build **downward** into a castle (a basement level).
+- Second-player tests: refusal on another player's castle, the player cost path, events with several
+  players inside.
+- Re-test plot-edge containment on a new edge (the original test edge has since been fenced).
+- Answer the remaining indoor questions: castle servants and defences against event units, units on a plot
+  with nobody near, sunlight through windows and doorways.
+- A machine-readable `[URIEL:event*]` API so Raphael can show layouts, the library and live runs without
+  parsing chat text, and the Raphael screens on top of it
+  ([handoff](../Uriel/Uriel/docs/RAPHAEL_CASTLE_EVENTS_HANDOFF.md)).
 
----
+### Milestone 3 — Castle Events complete
 
-*Roadmap items are tracked here and summarized on the
-[GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts) and Thunderstore
-mod pages. Nothing here is a promise — it's where Uriel is headed.*
+- **Toll door:** a public door that charges entry and starts a run.
+- **Entry trigger and capacity:** start a run when players enter; cap how many are inside at once.
+- **Rewards:** a configurable prize table (for example bosses × level → a weighted item tier).
+- **Event objects:** decorations and barriers spawned at the start of a run and removed at the end.
+- **Maze stairs:** stair variants rolled per run so the path changes, restored afterwards.
+
+### Milestone 4 — Castle Rentals
+
+Rent a coffin or a room for a set time: a paid lease, a spawn point, access to chosen storage, and eviction
+with item return when it ends. Design: [`docs/features/CASTLE_RENTALS.md`](features/CASTLE_RENTALS.md).
+
+### 1.0 release criteria
+
+- Every feature is **Stable**: validated on a live production server, commands and config keys frozen.
+- Raphael covers the main screens of every feature.
+- Player and admin documentation is complete.
+
+## After 1.0 (exploratory)
+
+Ideas under consideration; they may change shape or not happen.
+
+- **Conditional door access:** share a door for a payment or during set hours.
+- **Bulk storage sharing:** share all heart-linked storage at a location at once, excluding the pay chest and
+  private chests.
+- **Teleporters** to set map coordinates.
+- **Plot expansion:** a phase gate to a separate instance, or copying map sections into buildable plots.
+- **Expanded castle decor:** more in-game assets usable as decoration.
+
+## Shelved
+
+- **Basement levels:** building below the first floor isn't feasible server-side (the terrain mesh and the
+  camera are client-side). See [`docs/features/BASEMENT_BUILDING.md`](features/BASEMENT_BUILDING.md).
+
+## Shipped history
+
+| Version | Highlights |
+|---|---|
+| 0.21.0 | Castle Events (alpha): spawned units, containment, layouts, door gates, layered templates, scaling, timer |
+| 0.20.0 | Flush-to-ground object placement, hazard and container block lists, less lag on move |
+| 0.19.0 | Per-object and global spawn conditions, abandoned-plot cleanup during play |
+| 0.15.0 – 0.18.x | Object Spawning: catalog, Discovery unlocks, respawn and durability flags, overlap guard |
+| 0.14.0 | Live stair restyle |
+| 0.7.0 – 0.13.x | Stair hot-swap, clean stair removal |
+| 0.2.0 – 0.6.0 | Public storage, sharing rules, public prison cells |
+| 0.1.0 | Project scaffold |
+
+Full detail: [`CHANGELOG.md`](../CHANGELOG.md).

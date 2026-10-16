@@ -3,6 +3,26 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.21.0 (2026-10-15)
+
+- **New (alpha): Castle Events.** Turn a castle into an event space: place spawn markers for mobs and
+  bosses, bind doors that stay shut until their group is defeated, and start a run by hand. Off by default
+  (`CastleEvents.Enabled`). Admins can run events on any plot; castle owners can run them on their own plot
+  when `CastleEvents.PlayerEvents` is on.
+- **Layered templates.** A squad is what one group spawns, a floor template assigns squads to groups, and
+  a castle template assigns floor templates to floors. Random picks at every layer: "1 of these 3 bosses",
+  "2 of these 10", an assortment, or one of several combinations.
+- **Scaling per run.** Presets (`easy`, `hard`, `brutal`), `level=40`, `auto` (the highest player level on
+  the plot), and multipliers for health, damage, speed and attack speed: `.uriel event start castle1 hard,auto+2`.
+- **Timer and history.** The clock starts when every foe is in place. Clearing a group, defeating the last
+  boss and completing the event are timed and announced. `limit=15m` fails the run when time runs out.
+  `.uriel event history` shows recent runs and best times.
+- **Contained units.** Spawned units never leave the castle plot, and can be kept to a room, a floor
+  (storey) or a leash radius. All units in a run fight on one side.
+- **Admin unit tools:** `.uriel unit spawn | list | kill | despawn | clear | purge`. Spawned units drop no
+  loot and are removed at restart.
+- **New help topic:** `.uriel help events`.
+
 ## 0.20.0 (2026-07-11)
 
 - **New: sit objects flush with the ground.** Some objects spawned floating in the air (e.g. the Church of

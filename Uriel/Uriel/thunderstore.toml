@@ -4,8 +4,8 @@ schemaVersion = "0.0.1"
 [package]
 namespace = "kdpen"
 name = "Uriel"
-versionNumber = "0.20.0"
-description = "A host of server-side QoL enhancements: collect & place world objects into your castle, hot-swap stairs without demolishing, share specific chests or prison cells publicly. Each feature admin-toggleable. Server-side only."
+versionNumber = "0.21.0"
+description = "A host of server-side QoL tools: place world objects in your castle, restyle stairs live, share chests and prison cells, and (alpha) turn a castle into an event space with spawned foes and gated doors. Each feature toggleable."
 websiteUrl = "https://github.com/KDavidP1987/Uriel-Lord-of-Hosts"
 containsNsfwContent = false
 

@@ -17,6 +17,6 @@ internal static class RootCommands
             $"Uriel, Lord of Hosts - a host of server enhancements (v{MyPluginInfo.PLUGIN_VERSION}). " +
             "Each feature is admin-toggleable in config.\n" +
             "Features: OBJECTS (collect & build world objects), STORAGE (share chests), STAIRS (restyle stairs).\n" +
-            "Type '.uriel help' for the command menu, or jump in: '.uriel help objects | storage | stairs | admin'.");
+            "Type '.uriel help' for the command menu, or jump in: '.uriel help objects | storage | stairs | events | admin'.");
     }
 }

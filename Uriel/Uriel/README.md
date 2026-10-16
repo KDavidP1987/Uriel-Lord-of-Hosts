@@ -35,6 +35,16 @@ welcome too.
 **Status:** pre-1.0 public testing · **server-side only** · several feature groups
 live today, more sub-mods planned under the Uriel umbrella.
 
+| Feature | Stage | Default |
+|---|---|---|
+| 🏺 Object Spawning | Beta | On (admin-only until you open it to players) |
+| 🗄 Public Storage and prison cells | Beta | On |
+| 🪜 Stair Editing | Beta | On |
+| 🏰 Castle Events | **Alpha** | **Off** |
+
+**Beta:** in testers' hands, core paths validated live. **Alpha:** built and tested on a
+development server only; expect rough edges, and commands may change.
+
 ## What it does
 
 Uriel is never all-or-nothing: **every feature ships behind its own config
@@ -157,6 +167,83 @@ with any pre-1.0 feature, try it on a spare staircase first. If a stray "ghost" 
 left behind, an admin can clean it with `.uriel stairpurge`. You can disable the whole feature
 with `StairSwap.Enabled=false`.
 
+### 🏰 Castle Events *(alpha, off by default)*
+
+Turn a castle into an event space. Walk your castle and drop **spawn markers** for mobs and
+bosses, bind **doors** that stay shut and locked until the units guarding them are defeated,
+then start a run. Players fight their way through room by room: a gated door doesn't open
+until its group is beaten.
+
+**How it fits together**
+
+- **Layout** (per castle): markers grouped by name. Each group sits on a floor and may hold
+  one door. `.uriel event marker <group> [mob|boss]` places a marker where you stand;
+  `.uriel event door <group>` binds the door nearest you.
+- **Squad**: what a group spawns. Random picks: `distinct` takes N different units ("1 of
+  these 3 bosses", "2 of these 10"), `any` draws an assortment. A squad can hold several
+  combinations; one is chosen per run.
+- **Floor template**: which squad each group on a floor gets.
+- **Template**: which floor template each floor uses. Give a floor several and one is
+  chosen per run, so a floor can have a different theme each time.
+
+**Example** (floor 1: five militia guard a door, then a boss, one of three):
+
+```
+# the layout: stand in each spot
+.uriel event marker g1 mob
+.uriel event door g1
+.uriel event marker g2 boss
+# what spawns
+.uriel squad create militia5
+.uriel squad add militia5 mob CHAR_Militia_Guard,CHAR_Militia_Light 5 any
+.uriel squad create boss1of3
+.uriel squad add boss1of3 boss Foreman_VBlood,StoneBreaker_VBlood,Stalker_VBlood 1 distinct
+.uriel floor create f1
+.uriel floor assign f1 g1 militia5
+.uriel floor assign f1 g2 boss1of3
+.uriel template create castle1
+.uriel template floor castle1 1 f1
+# run it, scaled to the strongest player present
+.uriel event start castle1 hard,auto+2
+```
+
+**Run options** (comma-separated, after the template name):
+
+| Option | Effect |
+|---|---|
+| `easy` · `normal` · `hard` · `brutal` | Presets for health, damage and speed |
+| `level=40` · `level+5` · `auto` · `auto+2` | Set the level; `auto` = the highest player level on the plot |
+| `hp*2` · `dmg*1.5` · `speed*1.2` · `aspd*1.3` | Multiply health, damage, move speed, attack speed (0.1 to 10) |
+| `limit=15m` | Time limit (seconds, minutes or hours, up to 6 h); the run fails when it runs out |
+| `faction=keep` | Units keep their own factions (by default a run fights as one side) |
+
+A template can carry default options; the ones you type at the start add to them.
+
+**During a run** the clock starts once every foe is in place. Clearing a group opens its
+door; defeating the last boss and finishing the event are timed and announced to everyone
+on the plot. `.uriel event status` shows progress, `.uriel event stop` removes the units
+and puts every door back, and `.uriel event history` shows recent runs and best times.
+
+**Containment:** event units never leave the castle plot, and by default stay on the floor
+they spawned on (`CastleEvents.DefaultContain`). A marker can keep its units to a room, a
+floor, or a leash radius instead.
+
+**🧪 Alpha guidance (Castle Events)**
+
+- **Off by default.** Turn it on with `CastleEvents.Enabled=true`. Admins can run events on
+  any plot. To let castle owners run events on their own plot, also set
+  `CastleEvents.PlayerEvents=true`; marker and run costs are configurable and free by default.
+- **Tested by the developer on a development server, single player.** Several players in one
+  event, and players running events on their own castles, have not been tested yet. Please
+  report what you find.
+- **Spawned units are never saved.** A server restart removes them (and ends any run, putting
+  doors back). Units drop no loot.
+- **Keep chat commands short.** The game cuts chat lines at about 120 characters. Unit names
+  can be shortened (`Foreman_VBlood`), and long unit lists can be added in parts with
+  `.uriel squad extend`.
+- **Kill switch:** `.uriel unit purge` (then `.uriel unit purge confirm`) removes every Uriel
+  unit on the server.
+
 ## Installation
 
 Uriel is a **server-side** mod — install it on your **V Rising dedicated
@@ -201,7 +288,7 @@ through the `.uriel` chat commands, with or without Raphael.
 
 All commands are chat commands prefixed with `.uriel`. Type `.uriel` for a quick
 overview, or **`.uriel help`** for a clean, topic-by-topic menu (`objects` /
-`storage` / `stairs` / `admin`). Most targeted commands also accept a trailing
+`storage` / `stairs` / `events` / `admin`). Most targeted commands also accept a trailing
 **`nearest`** token to act on the closest object to you instead of where you're
 aiming — handy when a menu or UI panel has your aim ray pointing elsewhere
 (e.g. `.uriel share nearest`, `.uriel stairswap stone2 nearest`).
@@ -293,6 +380,54 @@ to override its settings directly.
 </details>
 </details>
 
+<details>
+<summary><b>🏰 Castle Events commands (alpha)</b></summary>
+
+Admins on any plot; castle owners on their own plot when `CastleEvents.PlayerEvents=true`.
+
+**Layout** (stand where you want things):
+
+| Command | What it does |
+|---|---|
+| `.uriel event marker <group> [mob\|boss] [unit\|-] [count] [level] [contain\|-]` | Place a spawn marker where you stand. Without a unit, the group's squad decides what spawns. `contain`: `room`, `storey`, `plot`, or a leash in metres |
+| `.uriel event door <group>` · `undoor <group>` | Bind the castle door nearest you (within 6 m) to a group, or unbind it |
+| `.uriel event squad <group> <squad\|->` | Give a group its own squad, used when the template doesn't cover it |
+| `.uriel event list` · `remove <#id\|group>` | Show the layout · remove a marker or a whole group |
+
+**Runs:**
+
+| Command | What it does |
+|---|---|
+| `.uriel event start [template\|-] [options]` | Start a run (a template, floor template or squad name; `-` = each group's own squad) |
+| `.uriel event status` · `stop` · `history` | Progress · end the run and restore doors · recent runs and best times |
+
+**Library** (an admin's entries are server-wide, a player's are their own):
+
+| Command | What it does |
+|---|---|
+| `.uriel squad create <name>` | New squad |
+| `.uriel squad add <name> <mob\|boss> <unit[,unit…]> [count] [any\|distinct] [level] [set]` | Add an entry. `set` 2, 3… starts another combination |
+| `.uriel squad extend <name> <set> <entry> <unit[,unit…]>` | Add more units to an entry's list |
+| `.uriel squad remove <name> <set> [entry]` · `weight <name> <set> <1-100>` | Remove an entry or set · how often a set is chosen |
+| `.uriel floor create <name>` · `assign <name> <group\|*> <squad[,squad…]\|->` | Floor template: a squad per group (several = one chosen per run) |
+| `.uriel template create <name>` · `floor <name> <floor\|*> <floor template[,…]\|->` | Template: a floor template per floor (several = one chosen per run) |
+| `.uriel template options <name> <options\|->` | Default run options |
+| `.uriel squad\|floor\|template list` · `show <name>` · `delete <name>` | Browse and manage |
+
+<details>
+<summary><i>Admin unit tools</i></summary>
+
+| Command | What it does |
+|---|---|
+| `.uriel unit spawn <name\|guid> [count] [level] [here\|aim] [contain]` | Spawn units into the castle plot you're in |
+| `.uriel unit list` | Uriel units per plot |
+| `.uriel unit kill [radius] [all\|boss\|mob]` | Kill nearby Uriel units (counts as a defeat; groups clear, doors open) |
+| `.uriel unit despawn [radius]` · `clear` | Remove the nearest unit · every unit on this plot |
+| `.uriel unit purge [confirm]` | Kill switch: every Uriel unit on the server |
+| `.uriel unit status [radius]` · `rooms` · `door <open\|close\|lock\|unlock\|show>` | Diagnostics (details in the server log) |
+</details>
+</details>
+
 ## Configuration
 
 `BepInEx/config/kdpen.Uriel.cfg` — every feature has its own `Enabled` switch.
@@ -321,28 +456,36 @@ Config changes take effect on server restart.
 | StairSwap | Enabled | `true` | Allow live stair restyling + `.uriel removestairs` |
 | StairSwap | MaxTargetDistance | `6` | Aim distance for the stair commands |
 | StairSwap | RespawnGapFrames | `5` | Frames between destroy & respawn when restyling a stair |
+| CastleEvents | Enabled | `false` | Master switch for Castle Events and the unit commands (alpha) |
+| CastleEvents | PlayerEvents | `false` | Let castle owners run events on their own plot (admins always can, anywhere) |
+| CastleEvents | DefaultContain | `storey` | Where a marker's units stay when it doesn't say: `plot`, `room`, `storey`, a leash in metres, or a mix like `room,15` |
+| CastleEvents | MaxMarkersPerPlot | `40` | Most spawn markers a player's castle may have |
+| CastleEvents | MarkerCostItem / MarkerCostAmount / BossMarkerCostAmount | `0` | Item a player pays per mob or boss marker (refunded on removal; 0 = free) |
+| CastleEvents | RunCostItem / RunCostAmount | `0` | Item a player pays to start a run (0 = free) |
+| CastleEvents | MaxUnitsPerPlot / MaxTrackedUnits | `60` / `300` | Most Uriel units alive on one plot / on the server |
+| CastleEvents | *(more)* | — | MaxUnitsPerCommand, MaxSpawnsPerTick, MaxDespawnsPerTick, UnitLifetimeSeconds, ClearDrops, ContainCheckSeconds — see the generated `.cfg`. Layouts, the library and run history live in `BepInEx/config/Uriel/castle_events.json` |
 | Diagnostics | VerboseLogging | `false` | Extra per-action log lines (useful when testing) |
 
-## Roadmap
+## Roadmap to 1.0
 
-Uriel is an umbrella mod — the plan is to keep adding small, independently
-toggleable server-side sub-mods. **Tentative and subject to change**; full list
-(incl. large-scope ideas) in the
+Full detail in the
 **[roadmap](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/docs/ROADMAP.md)**.
+Tentative and driven by tester feedback.
 
-**Planned next:**
-- **Coffin sharing** — share coffin use, with an optional cost-to-use modifier.
-- **Conditional door access** — share a door behind payment and/or allowed time
-  windows (select hours).
-- **Bulk storage sharing** — open *all* heart-linked storage at a location in one
-  action, auto-excluding the pay chest and any chests you've marked private.
-- **Raphael integration** *(formerly BloodCraftHub)* — a client-side companion UI
-  (share panels, prisoner-take button, stair-style picker).
+1. **Harden the beta features.** Live-server validation of Object Spawning, Public Storage and
+   Stair Editing; less server cost on repeated move/rotate/delete.
+2. **Castle Events to beta.** Multiplayer and player-castle testing, the remaining indoor
+   checks (castle servants and defences, sunlight), and Raphael screens for building and
+   running events.
+3. **Castle Events complete.** A toll door that charges entry and starts a run, entry triggers
+   and capacity limits, reward tables, event decorations and barriers, and maze stairs that
+   change the path each run.
+4. **Castle Rentals.** Rent a coffin or a room for a set time, with access to chosen storage.
+5. **1.0:** every feature validated on a live server, commands and config frozen, Raphael
+   covering the main screens.
 
-**Bigger ideas being explored:** plot expansion (separate-instance phase gates or
-map copy/paste), a PvP-arena V Blood boss mode with prize tables, paid area-gating
-for mazes, scheduled/paid door & teleport controls, more castle decor assets,
-triggered NPC spawns, and basement levels.
+**After 1.0 (exploratory):** conditional door access (payment or set hours), bulk storage
+sharing, teleporters, plot expansion, expanded castle decor.
 
 Have a feature you'd like to see in the host? Bring it to the
 [Discord](https://discord.gg/usC9QgBrXK).
