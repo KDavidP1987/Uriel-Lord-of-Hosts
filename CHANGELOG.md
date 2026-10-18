@@ -8,6 +8,48 @@ Format: [Keep a Changelog](https://keepachangelog.com/) flavored;
 versions follow the mod's own incremental scheme (pre-1.0: minor = feature
 batch, patch = fixes).
 
+## [0.22.0] - 2026-10-18
+
+**Admin controls and kill switches.** Some server admins want to run Uriel with parts of it off (most often no
+spawned objects until it is thoroughly tested) and want a guaranteed way back to vanilla. Every feature switch now
+binds admins too, a master switch turns the whole mod off, and new commands undo what Uriel put in the world. Tested
+in game by the vrclient loop on the local dev server (single player): `killswitch.vrs` 19/19, `switches-off.vrs`
+13/13, `master-off.vrs` 14/14, the boot reset, and the regressions `unit-spawner.vrs` 23/23 and
+`castle-event.vrs` 44/44.
+
+### Added
+
+- `[General] Enabled` (default true): master switch. Off = every feature off for everyone, admins included.
+- `[KillSwitch] RestoreVanillaOnBoot` (default false): one-shot reset at the next start for a server an admin can't
+  get into; Uriel sets it back to false itself. Objects not found at boot get one more try about a minute later.
+- `[CastleEvents] DoorGates` (default true): events may shut and lock castle doors. Off: `.uriel event door` and
+  `.uriel unit door` are refused and a run never holds a door (unbinding still works).
+- `[PublicStorage] CostsEnabled` (default true): paid shares. Off: no new price (`share cost` with a non-zero item)
+  and no `.uriel paychest`; Uriel moves no payment items; an already-priced container stays closed to others
+  (never made free behind its owner's back) until its owner removes the price or unshares.
+- `.uriel killswitch [confirm]` (admin, two-step, 30 s): stops every castle event (units removed, doors put back as
+  they were), removes every Uriel unit and every Uriel-spawned object, and unshares every container. Implemented in
+  `Services/KillSwitch.cs`; log `[Uriel KILLSWITCH] why=… events=… units=… objects=… objectsUnresolved=… unshared=…`.
+- `.uriel purgeall [confirm]` (admin, two-step): every Uriel-spawned object on every plot. Records whose object can't
+  be found are kept and counted.
+- `.uriel event stopall` (admin): every running event, doors put back.
+- `.uriel features` (admin): which features are on.
+
+### Changed
+
+- Every feature gate reads `Settings.<Feature>On` (master AND feature switch).
+- Admin cleanup works with its feature switched off: `.uriel purgeplot`, `forcepurgeplot`, `forcedespawn`,
+  `purgeorphans`, and `.uriel unit list|kill|despawn|clear`.
+- Object spawning off now also stops the auto-respawn loop.
+- Boot: a share whose type is switched off (chests, or prison cells with `PrisonEnabled=false`) is kept in the
+  registry but not applied, and a container that still looks public is made private, so "off" is vanilla whatever
+  the save kept. Before, cells were re-shared with `PrisonEnabled=false`.
+
+### Fixed
+
+- `.uriel purgeplot` (and the new purge-all) counted an object twice when it was both in the live set and the
+  registry: a destroyed entity still resolves until the frame ends. Found by `killswitch.vrs`.
+
 ## [0.21.0] - 2026-10-15
 
 **Castle Events (alpha).** A new feature group that turns a castle into an event space: spawned mobs and

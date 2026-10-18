@@ -3,6 +3,18 @@
 Condensed, player-facing changelog. Full technical history:
 [GitHub](https://github.com/KDavidP1987/Uriel-Lord-of-Hosts/blob/main/CHANGELOG.md)
 
+## 0.22.0 (2026-10-18)
+
+- **Every feature switch now applies to admins too**, and a new master switch `General.Enabled` turns the
+  whole mod off. Want to play it safe? `ObjectSpawn.Enabled=false` means no spawned objects.
+- **New switches:** `CastleEvents.DoorGates` (events may lock castle doors) and `PublicStorage.CostsEnabled`
+  (paid shares; when off, a priced chest stays closed rather than becoming free).
+- **Kill switch:** `.uriel killswitch` (then `confirm`) restores vanilla: stops every event and puts its doors
+  back, removes every Uriel unit and spawned object, and makes every shared chest and cell private. Also
+  `.uriel purgeall`, `.uriel event stopall` and `.uriel features`. They work even with features switched off.
+- **Can't get in?** `KillSwitch.RestoreVanillaOnBoot=true` does the same reset at the next start, once.
+- Fixed: `.uriel purgeplot` could report an object twice.
+
 ## 0.21.0 (2026-10-15)
 
 - **New (alpha): Castle Events.** Turn a castle into an event space: place spawn markers for mobs and
