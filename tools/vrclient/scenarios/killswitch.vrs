@@ -1,0 +1,66 @@
+# killswitch.vrs: the server-wide restore-to-vanilla with every feature on. A spawned object and a running castle event
+# (two held doors, three units) are all undone by '.uriel killswitch' + confirm: the event stops, its doors are put back
+# exactly as they were before the run, no Uriel unit is left, the object is gone. Then '.uriel purgeall' + confirm
+# removes a fresh object server-wide, and '.uriel event stopall' with nothing running says so.
+# Needs: all switches on (CastleEvents.Enabled=true); plot 11 layout gate1/gate2 + template evtest (castle-event.vrs);
+# TM_Glassblower_Crate01 placeable in the courtyard at (-2030, -1717).
+ensure
+console TPHome
+wait 3
+mark
+chat .uriel features
+expect-reply Stair swap on. Object spawning on.
+expect-seen \[CHAT> ${CHARACTER}\] Uriel features:.*event doors on\. Public chests on, prison cells on, paid shares on\.
+# clean start
+chat .devtp -2014 -1705 5
+wait 3
+chat .uriel event stop
+chat .uriel unit clear
+wait 3
+# the gate1 door as the players left it
+chat .devtp -2030 -1713 5
+wait 2
+chat .uriel unit door show
+expect-log \[Uriel DOOR\] action=show ok=True .*z=-1710\.0 open=(?P<D1OPEN>\w+) locked=(?P<D1LOCK>\w+)
+# an object
+chat .devtp -2030 -1717 5
+wait 3
+chat .uriel spawn TM_Glassblower_Crate01 here
+expect-log \[Uriel SPAWN\] TM_Glassblower_Crate01\(251142158\) at .*territory=11
+# a running event holding both doors
+chat .devtp -2014 -1705 5
+wait 3
+chat .uriel event start evtest
+expect-log \[Uriel EVENT\] started territory=11 template=evtest groups=2 units=3 bosses=1 doors=2 failedMarkers=0
+expect-log \[Uriel EVENT\] clock-started territory=11 units=3
+# the kill switch: arm, confirm
+chat .uriel killswitch
+expect-reply Run '.uriel killswitch confirm' within 30 s
+chat .uriel killswitch confirm
+expect-reply Kill switch done: 1 event(s) stopped
+expect-log \[Uriel EVENT\] killswitch territory=11 units=3 doorsRestored=2
+expect-log \[Uriel KILLSWITCH\] why=command events=1 units=\d+ pendingSpawns=0 objects=1 objectsUnresolved=\d+ unshared=\d+ staleShares=\d+ doorsPending=0
+wait 5
+chat .uriel unit list
+expect-reply No Uriel units
+chat .uriel spawnlist
+expect-seen \[CHAT> ${CHARACTER}\] (?!.*TM_Glassblower_Crate01).*
+chat .devtp -2030 -1713 5
+wait 2
+chat .uriel unit door show
+expect-log \[Uriel DOOR\] action=show ok=True .*z=-1710\.0 open=${D1OPEN} locked=${D1LOCK}
+shot full killswitch-after
+# purgeall: a fresh object, removed server-wide
+chat .devtp -2030 -1717 5
+wait 3
+chat .uriel spawn TM_Glassblower_Crate01 here
+expect-log \[Uriel SPAWN\] TM_Glassblower_Crate01\(251142158\) at .*territory=11
+chat .uriel purgeall
+expect-reply Run '.uriel purgeall confirm' within 30 s
+chat .uriel purgeall confirm
+expect-reply Removed 1 Uriel-spawned object(s) server-wide.
+expect-log \[Uriel SPAWN\] purge-all why=admin \d+ removed=1
+# stopall with nothing running
+chat .uriel event stopall
+expect-reply No castle event is running.
+console TPHome

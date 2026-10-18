@@ -15,7 +15,7 @@ internal static class EventCommands
     internal static bool Ready(ChatCommandContext ctx)
     {
         if (!Core.IsReady || Core.Events is null) { ctx.Reply("Uriel is not yet initialized."); return false; }
-        if (!Settings.CastleEvents_Enabled.Value)
+        if (!Settings.CastleEventsOn)
         {
             ctx.Reply("Castle events are disabled by the server admin (CastleEvents.Enabled).");
             return false;
@@ -82,6 +82,15 @@ internal static class EventCommands
     {
         if (!Ready(ctx)) return;
         ctx.Reply(Core.Events.StopRun(ctx.Event.SenderCharacterEntity, ctx.Event.User.IsAdmin));
+    }
+
+    [Command("stopall", description: "Admin: stop every castle event on the server: their units are removed and their doors put back as they were. Works with castle events switched off. Usage: .uriel event stopall", adminOnly: true)]
+    public static void StopAll(ChatCommandContext ctx)
+    {
+        if (!Core.IsReady || Core.Events is null) { ctx.Reply("Uriel is not yet initialized."); return; }
+        int runs = Core.Events.StopAll("stopped-all");
+        int pending = Core.Events.PendingDoors;
+        ctx.Reply(runs == 0 ? "No castle event is running." : $"Stopped {runs} castle event(s).{(pending > 0 ? $" {pending} door(s) weren't found yet; Uriel keeps trying to put them back." : "")}");
     }
 
     [Command("status", description: "Show the running event on this plot: the clock, bosses left, time left, groups cleared, units left, doors. Usage: .uriel event status")]

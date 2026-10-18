@@ -36,6 +36,11 @@ the total in-game prefab catalog and each player's unlocked-prefab collection (t
 endpoints remain 📋 planned. Object Spawning itself (Phase 1–2) is built but not yet
 released.**
 
+**⭐ v0.22.0 (2026-10-18) — admin controls and kill switches.** Master switch, new `DoorGates` and `CostsEnabled`
+switches, every switch binds admins, and `.uriel features` / `killswitch` / `purgeall` / `event stopall`. No wire-API
+change (ApiVersion stays 1). Everything Raphael needs is in
+**[`RAPHAEL_ADMIN_CONTROLS_HANDOFF.md`](RAPHAEL_ADMIN_CONTROLS_HANDOFF.md)**.
+
 **⭐ v0.21.0 (2026-10-15) — Castle Events (alpha).** A new feature group: spawn markers, door gates,
 layered templates (squad → floor template → template) with random picks, per-run scaling, a timer and run
 history, plus admin unit tools. Off by default (`CastleEvents.Enabled`). Human-text replies only; ApiVersion
@@ -221,7 +226,8 @@ for the `[URIEL:*]` API before building heavy parsers):**
 | Prison subdue via UI | ⛔ client-gated | **BCH button → `.uriel takeprisoner`** (§4.1) |
 | `.uriel takeprisoner` | 🔬 v0.10.0, two-layer (vanilla event → manual charm) | untested live; log says which layer fired |
 | Stair swap | ✅ v0.14.x destroy+respawn, applies LIVE (validated straight/curved/wide) | swapped stair = NEW entity (root + all fused children) — re-resolve by position after a swap; never cache stair ids |
-| Config kill-switches | ✅ | `PublicStorage.Enabled`, `PublicStorage.PrisonEnabled`, `StairSwap.Enabled` — commands reply "disabled by the server admin"; BCH should hide UI on that reply |
+| Config kill-switches | ✅ | `General.Enabled` (master: off = every feature off, admins included), `PublicStorage.Enabled`, `PublicStorage.PrisonEnabled`, `PublicStorage.CostsEnabled`, `StairSwap.Enabled`, `ObjectSpawn.Enabled`, `CastleEvents.Enabled`, `CastleEvents.DoorGates` — commands reply "disabled by the server admin" (`[URIEL:err] code=disabled` on the api); BCH should hide UI on that reply. With `CostsEnabled` off, `share cost <id> <n>` (non-zero) and `paychest` reply `Paid shares are disabled by the server admin (PublicStorage.CostsEnabled).`, and a withdrawal from a priced chest is denied with `This container has a price, and paid shares are switched off on this server — it's closed until its owner removes the price.` |
+| Admin restore-vanilla | ✅ v0.22.0 | `.uriel features` → `Uriel features: … Stair swap on. Object spawning on (admins only). …`; `.uriel killswitch` arm → `This removes everything Uriel put in the world: …`, then `.uriel killswitch confirm` → `Kill switch done: <a> event(s) stopped, <b> unit(s) being removed, <c> object(s) removed, <d> container(s) made private.`; `.uriel purgeall [confirm]` → `Removed <n> Uriel-spawned object(s) server-wide.`. All work with the features switched off. After a kill switch every shared container is private again: refresh any share UI |
 
 ## 6. Machine wire API (`[CommandGroup("uriel api")]`, ApiVersion 1)
 

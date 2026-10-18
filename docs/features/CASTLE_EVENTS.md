@@ -316,6 +316,20 @@ template of floor 1 and 2." Code: `Services/CastleEventService.Library.cs`, `Ser
 Not yet (later phases): an event toll door, maze stair variants, event objects, rewards, Raphael wire lines. Untested: the player path (PlayerEvents, costs, refusal on another's castle) needs a
 second player.
 
+## Switches and kill switch (v0.22.0, 2026-10-18)
+
+Every gate reads `Settings.<Feature>On` = `[General] Enabled` AND the feature's own switch, so a
+switched-off feature is off for admins too. Admin cleanup never reads the switches. Server-wide reset:
+`.uriel killswitch [confirm]` or `[KillSwitch] RestoreVanillaOnBoot=true` (one shot at the next start,
+then it sets itself back to false); both run `Services/KillSwitch.cs`.
+
+- `CastleEvents.Enabled=false` turns off unit spawning and events. `unit list|kill|despawn|clear|purge`
+  and admin `.uriel event stopall` still work. Units are never saved; the boot sweep removes any left.
+- `CastleEvents.DoorGates=false`: `event door` binding and the `unit door` tool are refused, and a run
+  never holds a door (bound groups simply run without one). Unbinding still works.
+- Kill switch order: `StopAll` (each run's units despawned, its doors put back as they were, not
+  opened), then `PurgeAllNow` for any unit left. Doors not found yet stay on the pending-release retry.
+
 ## Testing
 
 In-game tests follow Nyarlathotep's practice (CLAUDE.md › In-game tests): `tools/devserver.ps1` stops, deploys and
@@ -452,3 +466,22 @@ are separate rooms. On a stair, the floor lookup reads the ground stairwell up t
   with longer waits (at night the chat hint is low-contrast and OCR missed it).
 - Logs: no Uriel errors or warnings; the only exceptions are the boot-time Harmony reflection warnings.
 - Scenario order on plot 11: `event-layers` builds the g1-g4 layout that `event-scaling` uses; `castle-event` removes it.
+
+### Test results: switches and kill switch (v0.22.0, 2026-10-18)
+
+vrclient on the local dev server, single player, each with its own server config:
+- `SCENARIO PASS killswitch 19/19` (results `%TEMP%\vrclient\results\killswitch-20261018-133222.json`): a spawned
+  object and a running event (two held doors, three units) → `.uriel killswitch confirm` →
+  `[Uriel EVENT] killswitch territory=11 units=3 doorsRestored=2`, `[Uriel KILLSWITCH] why=command events=1 units=3
+  … objects=1`, no units left, the gate1 door back to its pre-run state; `purgeall` removed 1; `event stopall` with
+  nothing running. The first run (16/19) caught the purge double-count, fixed before this pass.
+- Boot reset: `RestoreVanillaOnBoot=true` → `[Uriel KILLSWITCH] why=boot … objects=1`, the setting read `false`
+  afterwards, the courtyard empty in game.
+- `SCENARIO PASS switches-off 13/13` (ObjectSpawn, DoorGates, CostsEnabled off): admin spawn and the api refused,
+  door binding and the door tool refused, a run started with `doors=0` and held none, `purgeplot` still removed the
+  object; the boot log had no `auto-respawn loop started`.
+- `SCENARIO PASS master-off 14/14` (`General.Enabled=false`): stairs, objects, units, events and sharing refused for
+  an admin; `unit list`, `event stopall`, `purgeorphans` and `killswitch` still work.
+- Regression: `unit-spawner` 23/23, `castle-event` 44/44.
+- Not tested in game: the CostsEnabled refusal on a real chest and the prison/chest boot close (no container on the
+  test plot).

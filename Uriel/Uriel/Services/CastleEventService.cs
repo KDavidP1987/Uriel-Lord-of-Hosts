@@ -344,6 +344,7 @@ internal sealed partial class CastleEventService
     {
         if (!TryCallerPlot(character, isAdmin, out var feet, out var heart, out int territory, out string message)) return message;
         if (_runs.ContainsKey(territory)) return "An event is running on this plot. Stop it first ('.uriel event stop').";
+        if (!unbind && !Settings.DoorGatesOn) return "Event doors are disabled by the server admin (CastleEvents.DoorGates).";
         var g = FindGroup(LayoutFor(territory, create: false), group);
         if (g == null) return $"No group '{group}' on this plot. A group starts with its first marker ('.uriel event marker {group}').";
         if (unbind)
@@ -456,7 +457,7 @@ internal sealed partial class CastleEventService
 
     public string StartRun(Entity character, bool isAdmin, string templateName, string options)
     {
-        if (!Settings.CastleEvents_Enabled.Value) return "Castle events are disabled by the server admin (CastleEvents.Enabled).";
+        if (!Settings.CastleEventsOn) return "Castle events are disabled by the server admin (CastleEvents.Enabled).";
         if (!TryCallerPlot(character, isAdmin, out _, out var heart, out int territory, out string message)) return message;
         if (_runs.ContainsKey(territory)) return "An event is already running on this plot. '.uriel event stop' ends it.";
         var layout = LayoutFor(territory, create: false);
@@ -538,7 +539,7 @@ internal sealed partial class CastleEventService
         {
             var rg = new RunGroup { Name = g.Name, Tag = Tag(territory, g.Name), Squad = squad };
             run.Groups.Add(rg);
-            if (g.Door != null) rg.Door = Hold(territory, heart, g);
+            if (g.Door != null && Settings.DoorGatesOn) rg.Door = Hold(territory, heart, g);
             // One queue call per marker and unit kind; several kinds at one marker continue one ring.
             foreach (var atMarker in units.GroupBy(u => u.M))
             {
@@ -840,10 +841,15 @@ internal sealed partial class CastleEventService
     }
 
     /// <summary>A purge or a castle loss ends every run: its doors are put back.</summary>
-    public void StopAll(string why)
+    public int StopAll(string why)
     {
-        foreach (var run in _runs.Values.ToList()) Stop(run, why);
+        var runs = _runs.Values.ToList();
+        foreach (var run in runs) Stop(run, why);
+        return runs.Count;
     }
+
+    /// <summary>Doors still held by a run that has ended but weren't found yet (being retried).</summary>
+    public int PendingDoors => _file.HeldDoors.Count(h => h.Pending);
 
     /// <summary>A system message to every player standing on the run's plot.</summary>
     static void Announce(Run run, string text)

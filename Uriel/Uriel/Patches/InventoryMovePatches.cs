@@ -25,7 +25,7 @@ internal static class MoveItemBetweenInventoriesSystemPatch
     public static void OnUpdatePrefix(MoveItemBetweenInventoriesSystem __instance)
     {
         if (!Core.IsReady || Core.PublicStorage is null) return;
-        if (!Settings.PublicStorage_Enabled.Value) return;
+        if (!Settings.PublicStorageOn) return;
 
         NativeArray<Entity> entities = default;
         try
@@ -60,7 +60,7 @@ internal static class MoveAllItemsBetweenInventoriesSystemPatch
     public static void OnUpdatePrefix(MoveAllItemsBetweenInventoriesSystem __instance)
     {
         if (!Core.IsReady || Core.PublicStorage is null) return;
-        if (!Settings.PublicStorage_Enabled.Value) return;
+        if (!Settings.PublicStorageOn) return;
 
         NativeArray<Entity> entities = default;
         try

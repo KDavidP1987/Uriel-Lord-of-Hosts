@@ -1,0 +1,11 @@
+# switches-setup.vrs: leaves one Uriel object on plot 11 for the restart tests (the boot kill switch and
+# switches-off.vrs). Needs: ObjectSpawn.Enabled=true.
+ensure
+console TPHome
+wait 3
+mark
+chat .devtp -2030 -1717 5
+wait 3
+chat .uriel spawn TM_Glassblower_Crate01 here
+expect-log \[Uriel SPAWN\] TM_Glassblower_Crate01\(251142158\) at .*territory=11
+console TPHome

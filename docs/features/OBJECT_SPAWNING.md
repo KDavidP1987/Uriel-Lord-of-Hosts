@@ -1034,6 +1034,20 @@ live-test says it's not enough: in-place rotate (no respawn) and a short-lived c
 subsequent spawns sit flush; `.uriel raise 0.5` / `lower 0.3` nudge live. (3) On the reporter's server, `.uriel
 move`/`rotate`/`despawn` a few objects on a built-up plot → less/no server hitch than before (compare to v0.19.0).
 
+## Switches and kill switch (v0.22.0, 2026-10-18)
+
+Every gate reads `Settings.<Feature>On` = `[General] Enabled` AND the feature's own switch, so a
+switched-off feature is off for admins too. Admin cleanup never reads the switches. Server-wide reset:
+`.uriel killswitch [confirm]` or `[KillSwitch] RestoreVanillaOnBoot=true` (one shot at the next start,
+then it sets itself back to false); both run `Services/KillSwitch.cs`.
+
+- `ObjectSpawn.Enabled=false`: every spawn/build command, the Raphael api, discovery and the auto-respawn
+  loop are off. Objects already placed stay (they're in the save, still Immortal if spawned that way)
+  until an admin removes them. `purgeplot`, `forcepurgeplot`, `forcedespawn` and `purgeorphans` still work.
+- `.uriel purgeall [confirm]`: every Uriel object on every plot (live marker set + registry). A record
+  whose object can't be resolved is kept and counted so a later run can finish it; the boot reset retries
+  once about a minute after start. Log: `[Uriel SPAWN] purge-all why=… removed=… unresolved=…`.
+
 ## References
 - KindredCommands (odjit, AGPL-3.0) — `Helper.ConvertPosToTileGrid`,
   `Services/CastleTerritoryService.cs` (position → heart). Technique only.

@@ -651,12 +651,20 @@ internal sealed class UnitSpawnService
         }
         if (DateTime.UtcNow > _purgeArmedUntil) return "Not armed. Run '.uriel unit purge' first.";
         _purgeArmedUntil = DateTime.MinValue;
+        var (queued, dropped) = PurgeAllNow();
+        return $"Purging {queued} unit(s); cancelled {dropped} pending spawn(s).";
+    }
+
+    /// <summary>The purge itself, unarmed (the server-wide kill switch calls it): every tracked unit and every unit
+    /// carrying our marker is queued for removal, and pending spawns are cancelled.</summary>
+    public (int queued, int dropped) PurgeAllNow()
+    {
         int dropped = DropQueued(_ => true);
         var all = new HashSet<long>();
         foreach (var t in _ledger.Values) if (all.Add(KeyOf(t.Unit))) _despawnQueue.Enqueue(t.Unit);
         foreach (var u in MarkedUnits()) if (all.Add(KeyOf(u))) _despawnQueue.Enqueue(u);
         Core.Log.LogInfo($"[Uriel UNIT] purge queued={all.Count} unqueued={dropped}");
-        return $"Purging {all.Count} unit(s); cancelled {dropped} pending spawn(s).";
+        return (all.Count, dropped);
     }
 
     /// <summary>Counts per plot, and the ten nearest tracked units.</summary>

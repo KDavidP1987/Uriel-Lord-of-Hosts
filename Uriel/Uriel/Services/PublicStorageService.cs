@@ -635,7 +635,7 @@ internal sealed class PublicStorageService
     public bool Share(Entity character, Entity container, out string message, bool isAdmin = false)
     {
         string cls = ClassifyContainer(container);
-        if (cls == "prison" && !Settings.PublicPrison_Enabled.Value)
+        if (cls == "prison" && !Settings.PublicPrisonOn)
         {
             message = "Prison-cell sharing is disabled by the server admin (PublicStorage.PrisonEnabled).";
             return false;
@@ -836,27 +836,43 @@ internal sealed class PublicStorageService
     public void ReapplyAll()
     {
         if (_entries.Count == 0) return;
-        if (!Settings.PublicStorage_Enabled.Value)
-        {
-            Core.Log.LogInfo($"[Uriel SHARE] PublicStorage disabled in config; {_entries.Count} share(s) NOT applied (containers stay private).");
-            return;
-        }
-        if (!CanResolvePublicTeam())
+        bool anyOn = false;
+        foreach (var entry in _entries) anyOn |= IsClassOn(entry);
+        if (anyOn && !CanResolvePublicTeam())
         {
             Core.Log.LogWarning($"[Uriel SHARE] cannot re-apply {_entries.Count} share(s): no neutral team source.");
             return;
         }
-        int applied = 0, missing = 0;
+        int applied = 0, missing = 0, kept = 0, closed = 0;
         foreach (var entry in _entries)
         {
             var container = ResolveEntry(entry);
             if (container == Entity.Null) { missing++; continue; }
+            if (!IsClassOn(entry))
+            {
+                // Switched off: the share stays in the registry (switching back on restores it), but the container is
+                // made private if anything of the share survived the restart, so it is vanilla whatever the save kept.
+                kept++;
+                if (LooksPublic(container) && RestoreToPrivate(container, entry, out _)) closed++;
+                continue;
+            }
             ApplyPublicTeam(container, entry); // also (re)captures the heart anchor when the save restored the connection
             applied++;
         }
+        if (kept > 0)
+            Core.Log.LogInfo($"[Uriel SHARE] switched off in config: {kept} share(s) NOT applied, {closed} container(s) found still public and made private.");
         SaveSync(); // persist any newly-captured heart anchors (entries from pre-v0.8.0 builds)
         Core.Log.LogInfo($"[Uriel SHARE] re-applied public team to {applied} container(s); {missing} entry(ies) did not resolve (kept; '.uriel unshareall' to purge).");
     }
+
+    /// <summary>Is this entry's container type switched on? Chests follow PublicStorage.Enabled; prison cells also
+    /// need PrisonEnabled (and the master switch over both).</summary>
+    static bool IsClassOn(PublicContainerEntry entry) =>
+        entry.ContainerClass == "prison" ? Settings.PublicPrisonOn : Settings.PublicStorageOn;
+
+    /// <summary>A shared container has its castle link severed (see <see cref="ApplyPublicTeam"/>).</summary>
+    static bool LooksPublic(Entity container) =>
+        container.TryGetComponent<CastleHeartConnection>(out var c) && !c.CastleHeartEntity.GetEntityOnServer().Exists();
 
     // ================================================================ policy modifiers (v0.3.0)
 
@@ -932,6 +948,11 @@ internal sealed class PublicStorageService
 
     public bool SetCost(Entity character, Entity container, int itemGuid, int amount, out string message, bool isAdmin = false)
     {
+        if (itemGuid != 0 && !Settings.StorageCostsOn)
+        {
+            message = "Paid shares are disabled by the server admin (PublicStorage.CostsEnabled).";
+            return false;
+        }
         if (itemGuid != 0 && (amount <= 0))
         {
             message = "Cost amount must be positive (or use item id 0 to make it free).";
@@ -962,6 +983,11 @@ internal sealed class PublicStorageService
 
     public bool SetPayChest(Entity character, Entity container, out string message)
     {
+        if (!Settings.StorageCostsOn)
+        {
+            message = "Paid shares are disabled by the server admin (PublicStorage.CostsEnabled).";
+            return false;
+        }
         if (!CharacterControlsContainer(character, container))
         {
             message = "You don't control this container — aim at one of YOUR private chests.";
@@ -1505,6 +1531,12 @@ internal sealed class PublicStorageService
     {
         denyMsg = null;
         if (entry.CostItemGuid == 0) return true;
+        if (!Settings.StorageCostsOn)
+        {
+            // Never free behind the owner's back: a priced container stays shut while payments are switched off.
+            denyMsg = "This container has a price, and paid shares are switched off on this server — it's closed until its owner removes the price.";
+            return false;
+        }
         var costItem = new PrefabGUID(entry.CostItemGuid);
 
         if (!InventoryUtilities.TryGetInventoryEntity(Core.EntityManager, character, out Entity playerInv)

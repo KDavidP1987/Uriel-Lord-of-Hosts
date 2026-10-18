@@ -421,7 +421,7 @@ internal sealed class ObjectSpawnService
     /// No-op when disabled by config or when the tick driver isn't running.</summary>
     public void StartRespawnLoop()
     {
-        if (!Settings.ObjectSpawn_RespawnEnabled.Value) return;
+        if (!Settings.ObjectSpawnOn || !Settings.ObjectSpawn_RespawnEnabled.Value) return;
         if (!Tick.IsRunning) { Core.Log.LogWarning("[Uriel SPAWN] auto-respawn loop NOT started (tick driver unavailable)."); return; }
         int seconds = Math.Max(5, Settings.ObjectSpawn_RespawnPollSeconds.Value);
         Tick.RunRepeating(seconds * 60, RespawnTick); // frames ≈ seconds × server fps; approximate cadence is fine
@@ -436,7 +436,7 @@ internal sealed class ObjectSpawnService
     /// duplicate, and a destroyed castle never resurrects its objects.</summary>
     void RespawnTick()
     {
-        if (!Settings.ObjectSpawn_RespawnEnabled.Value) return;
+        if (!Settings.ObjectSpawnOn || !Settings.ObjectSpawn_RespawnEnabled.Value) return;
         bool any = false;
         foreach (var r in _records) if (r.RespawnOnDestroy) { any = true; break; }
         if (!any) return;
@@ -975,7 +975,7 @@ internal sealed class ObjectSpawnService
     /// mode, with at least one unlock source active). Checked first so the hook is a no-op in the
     /// admin test-bed (AdminOnly=true), in Full mode, or when collection is disabled.</summary>
     public bool TracksKills =>
-        Settings.ObjectSpawn_Enabled.Value
+        Settings.ObjectSpawnOn
         && Settings.ObjectSpawn_CollectionEnabled.Value
         && !Settings.ObjectSpawn_AdminOnly.Value
         && IsDiscoveryMode()
@@ -1317,7 +1317,7 @@ internal sealed class ObjectSpawnService
     {
         EnsureCatalog();
         return $"[URIEL:version] api={apiVersion} plugin={MyPluginInfo.PLUGIN_VERSION} ready=1 " +
-               $"objectspawn={(Settings.ObjectSpawn_Enabled.Value ? 1 : 0)} adminonly={(Settings.ObjectSpawn_AdminOnly.Value ? 1 : 0)} " +
+               $"objectspawn={(Settings.ObjectSpawnOn ? 1 : 0)} adminonly={(Settings.ObjectSpawn_AdminOnly.Value ? 1 : 0)} " +
                $"collection={(Settings.ObjectSpawn_CollectionEnabled.Value ? 1 : 0)} mode={(IsDiscoveryMode() ? "Discovery" : "Full")} " +
                $"chance={Settings.ObjectSpawn_DiscoveryChancePercent.Value} total={_placeable.Count} discoverable={_discoverableGuids.Count} blocked={_blocked.Count}";
     }
@@ -2213,6 +2213,7 @@ internal sealed class ObjectSpawnService
     {
         var blocks = GetPlotBlocks(heart);
         int marker = 0, tracked = 0;
+        var destroyed = new HashSet<Entity>(); // destroyed entities exist until the frame ends: don't count them twice
 
         // (1) Live marker set — direct, in-session. Needs territory blocks to scope to THIS plot.
         if (blocks.Count > 0)
@@ -2222,23 +2223,54 @@ internal sealed class ObjectSpawnService
                 if (!e.TryGetComponent<Translation>(out var tr)) continue;
                 if (!blocks.Contains(BlockKey(ConvertPosToBlockCoord(tr.Value)))) continue;
                 DestroySpawned(e); // removes it from _liveSpawns
+                destroyed.Add(e);
                 marker++;
             }
 
         // (2) Registry records on this plot — resolve + destroy (persistent; survives restart). Anything
-        // already destroyed in pass 1 won't re-resolve (fresh index), so no double count.
+        // already destroyed in pass 1 can still resolve this frame, so it is skipped by the destroyed set.
         var index = BuildLiveIndex();
         foreach (var r in new List<SpawnRecord>(_records))
         {
             if (r.TerritoryIndex != territory) continue;
             Entity e = index.Resolve(r);
-            if (e != Entity.Null && e.Exists()) { DestroySpawned(e); tracked++; }
+            if (e != Entity.Null && e.Exists() && !destroyed.Contains(e)) { DestroySpawned(e); tracked++; }
             _records.Remove(r);
         }
 
         SaveSync();
         return (marker, tracked);
     }
+
+    /// <summary>Kill switch: remove EVERY Uriel-spawned object on the server (live marker set + the whole registry),
+    /// whatever plot it's on. Registry-driven like the plot purge, so native objects are never touched. A record whose
+    /// object can't be found right now is KEPT (it may not be loaded yet) and counted, so a later run can finish it.</summary>
+    public (int removed, int unresolved) PurgeAll(string why)
+    {
+        int removed = 0, unresolved = 0;
+        // A destroyed entity still exists until the frame ends, so pass 2 would find pass 1's objects again.
+        var destroyed = new HashSet<Entity>();
+        foreach (var e in new List<Entity>(_liveSpawns))
+        {
+            if (!e.Exists()) { _liveSpawns.Remove(e); continue; }
+            DestroySpawned(e);
+            destroyed.Add(e);
+            removed++;
+        }
+        var index = BuildLiveIndex();
+        foreach (var r in new List<SpawnRecord>(_records))
+        {
+            Entity e = index.Resolve(r);
+            if (e == Entity.Null) { unresolved++; continue; }
+            if (e.Exists() && !destroyed.Contains(e)) { DestroySpawned(e); removed++; }
+            _records.Remove(r);
+        }
+        SaveSync();
+        Core.Log.LogInfo($"[Uriel SPAWN] purge-all why={why} removed={removed} unresolved={unresolved} records={_records.Count}");
+        return (removed, unresolved);
+    }
+
+    public int RecordCount => _records.Count;
 
     /// <summary>LIGHT purge — remove Uriel's objects on the plot you're standing in via the live marker +
     /// the persistent registry. Precise and safe; never touches native objects. If a stray survives (e.g.

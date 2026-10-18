@@ -1,0 +1,32 @@
+# master-off.vrs: [General] Enabled=false turns every feature off for an admin, while the cleanup commands still work.
+# Needs config: General.Enabled=false (feature switches all on).
+ensure
+console TPHome
+wait 3
+mark
+chat .uriel features
+expect-reply Master switch [General] Enabled is OFF
+expect-seen \[CHAT> ${CHARACTER}\] Uriel features:.*Stair swap OFF\. Object spawning OFF\. NPC units and castle events OFF, event doors OFF\. Public chests OFF, prison cells OFF, paid shares OFF\.
+chat .uriel stairstyles
+expect-reply Stair swapping is disabled by the server admin.
+chat .uriel spawn TM_Glassblower_Crate01 here
+expect-reply Object spawning is disabled by the server admin
+chat .uriel unit spawn CHAR_Bandit_Thug 1
+expect-reply Castle events are disabled by the server admin (CastleEvents.Enabled).
+chat .uriel event list
+expect-reply Castle events are disabled by the server admin (CastleEvents.Enabled).
+chat .uriel share
+expect-reply Public storage is disabled by the server admin.
+# cleanup still answers
+chat .uriel unit list
+expect-reply No Uriel units
+chat .uriel event stopall
+expect-reply No castle event is running.
+chat .uriel purgeorphans
+expect-reply Orphan scan complete
+chat .uriel killswitch
+expect-reply Run '.uriel killswitch confirm' within 30 s
+chat .uriel killswitch confirm
+expect-reply Kill switch done: 0 event(s) stopped
+expect-log \[Uriel KILLSWITCH\] why=command events=0
+console TPHome

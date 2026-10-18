@@ -15,7 +15,7 @@ internal static class StairCommands
     static bool Ready(ChatCommandContext ctx)
     {
         if (!Core.IsReady) { ctx.Reply("Uriel is not yet initialized."); return false; }
-        if (!Settings.StairSwap_Enabled.Value)
+        if (!Settings.StairSwapOn)
         {
             ctx.Reply("Stair swapping is disabled by the server admin.");
             return false;

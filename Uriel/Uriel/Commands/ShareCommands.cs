@@ -16,7 +16,7 @@ internal static class ShareCommands
     static bool Ready(ChatCommandContext ctx)
     {
         if (!Core.IsReady) { ctx.Reply("Uriel is not yet initialized."); return false; }
-        if (!Settings.PublicStorage_Enabled.Value)
+        if (!Settings.PublicStorageOn)
         {
             ctx.Reply("Public storage is disabled by the server admin.");
             return false;
@@ -194,7 +194,7 @@ internal static class ShareCommands
     public static void TakePrisoner(ChatCommandContext ctx, string mode = null)
     {
         if (!Core.IsReady) { ctx.Reply("Uriel is not yet initialized."); return; }
-        if (!Settings.PublicStorage_Enabled.Value || !Settings.PublicPrison_Enabled.Value)
+        if (!Settings.PublicPrisonOn)
         {
             ctx.Reply("Prison-cell sharing is disabled by the server admin.");
             return;

@@ -2,7 +2,7 @@
 
 **For:** the Raphael workspace (`C:\dev\projects\Games\V Rising\Raphael Lord of Wisdom\Raphael\`, repo
 `KDavidP1987/Raphael-Lord-of-Wisdom`), its Uriel client in `Raphael/Services/Uriel/`.
-**From:** Uriel v0.21.0 (2026-10-15). Castle Events is **alpha** and off by default.
+**From:** Uriel v0.21.0 (2026-10-15), updated for v0.22.0 (2026-10-18: `event stopall`, `DoorGates`, cleanup with events off). Castle Events is **alpha** and off by default.
 **Companion doc:** [`BCH_INTEGRATION_HANDOFF.md`](BCH_INTEGRATION_HANDOFF.md) (the living contract for
 everything else Uriel exposes; its §6 wire grammar applies here too).
 
@@ -57,7 +57,7 @@ and add long unit lists in parts with `.uriel squad extend`.
 
 ## 3. Command reference
 
-Every command needs `CastleEvents.Enabled=true` (else: `Castle events are disabled by the server admin
+Every command needs `CastleEvents.Enabled=true` and the master `General.Enabled=true` (else: `Castle events are disabled by the server admin
 (CastleEvents.Enabled).`). Replies are human text today, one reply per line.
 
 ### Layout (`.uriel event …`, caller stands on the plot)
@@ -118,6 +118,11 @@ A/B/C`, or `10 mobs CHAR_Undead_SkeletonSoldier_Base[ L40]`.
 | `clear` | `Removing <n> unit(s) on this plot.` |
 | `purge [confirm]` | arm: `This removes every Uriel unit on the server (…). Run '.uriel unit purge confirm' within 30 s.` → `Purging <n> unit(s); cancelled <m> pending spawn(s).` |
 | `status [radius]` · `rooms` · `probe` · `probemap` · `door <open\|close\|lock\|unlock\|show>` | diagnostics; details go to the server log |
+
+`list`, `kill`, `despawn`, `clear` and `purge` work with `CastleEvents.Enabled=false` (cleanup is never locked out).
+`door` replies `Event doors are disabled by the server admin (CastleEvents.DoorGates).` when DoorGates is off.
+
+Admin `.uriel event stopall` (works with events switched off): `Stopped <n> castle event(s).` / `No castle event is running.`
 
 ### Common refusals
 
@@ -230,6 +235,7 @@ show the replies as they arrive.
 | Key (`[CastleEvents]`) | Default | Raphael impact |
 |---|---|---|
 | `Enabled` | `false` | Hide or grey out every Castle Events screen when off |
+| `DoorGates` | `true` | When off, hide door binding: `.uriel event door` replies `Event doors are disabled by the server admin (CastleEvents.DoorGates).` and runs leave every door alone |
 | `PlayerEvents` | `false` | Non-admins can use screens A-C only when on |
 | `DefaultContain` | `storey` | The containment a marker gets when the picker is left empty |
 | `MaxMarkersPerPlot` | `40` | Players' marker cap |
@@ -242,7 +248,7 @@ disabled and admin-only replies above tell Raphael what to show.
 
 ## 9. Testing a Raphael build against Uriel
 
-Connect to the dev server (127.0.0.1:9876) with Uriel 0.21.0 and `CastleEvents.Enabled=true`.
+Connect to the dev server (127.0.0.1:9876) with Uriel 0.22.0 and `CastleEvents.Enabled=true`.
 
 1. Layout: stand in a room, press **Mob marker here** (group `t1`). PASS: chat shows `Marker #… (mob) in group 't1'`.
 2. Door: stand by that room's door, press **Bind nearest door**. PASS: `Group 't1' holds the door …`.

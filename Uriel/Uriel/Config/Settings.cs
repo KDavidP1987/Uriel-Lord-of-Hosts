@@ -9,6 +9,21 @@ namespace Uriel.Config;
 /// </summary>
 internal static class Settings
 {
+    // ---- Master switch + kill switch ----
+    public static ConfigEntry<bool> Master_Enabled { get; private set; }
+    public static ConfigEntry<bool> KillSwitch_RestoreVanillaOnBoot { get; private set; }
+
+    // What every gate reads: a feature is on only when the master switch AND its own switch are on.
+    // Cleanup commands ('.uriel killswitch', purges, unshareall, unit purge, event stopall) never read these,
+    // so an admin can always undo what Uriel did with the feature off.
+    public static bool StairSwapOn => Master_Enabled.Value && StairSwap_Enabled.Value;
+    public static bool ObjectSpawnOn => Master_Enabled.Value && ObjectSpawn_Enabled.Value;
+    public static bool PublicStorageOn => Master_Enabled.Value && PublicStorage_Enabled.Value;
+    public static bool PublicPrisonOn => PublicStorageOn && PublicPrison_Enabled.Value;
+    public static bool StorageCostsOn => PublicStorageOn && PublicStorage_CostsEnabled.Value;
+    public static bool CastleEventsOn => Master_Enabled.Value && CastleEvents_Enabled.Value;
+    public static bool DoorGatesOn => CastleEventsOn && CastleEvents_DoorGates.Value;
+
     // ---- Feature: stair hot-swap ----
     public static ConfigEntry<bool> StairSwap_Enabled { get; private set; }
     public static ConfigEntry<float> StairSwap_MaxTargetDistance { get; private set; }
@@ -43,10 +58,12 @@ internal static class Settings
     // ---- Feature: public storage (per-container opt-in) ----
     public static ConfigEntry<bool> PublicStorage_Enabled { get; private set; }
     public static ConfigEntry<bool> PublicPrison_Enabled { get; private set; }
+    public static ConfigEntry<bool> PublicStorage_CostsEnabled { get; private set; }
     public static ConfigEntry<float> PublicStorage_MaxTargetDistance { get; private set; }
 
     // ---- Feature: castle events (docs/features/CASTLE_EVENTS.md) — Phase 1: admin unit spawner ----
     public static ConfigEntry<bool> CastleEvents_Enabled { get; private set; }
+    public static ConfigEntry<bool> CastleEvents_DoorGates { get; private set; }
     public static ConfigEntry<int> CastleEvents_MaxUnitsPerCommand { get; private set; }
     public static ConfigEntry<int> CastleEvents_MaxUnitsPerPlot { get; private set; }
     public static ConfigEntry<int> CastleEvents_MaxTrackedUnits { get; private set; }
@@ -69,6 +86,22 @@ internal static class Settings
 
     public static void Initialize(ConfigFile config)
     {
+        Master_Enabled = config.Bind(
+            "General", "Enabled", true,
+            "Master switch. False turns EVERY Uriel feature off for everyone, admins included, whatever the " +
+            "feature switches below say. The admin cleanup commands ('.uriel killswitch', '.uriel purgeall', " +
+            "'.uriel unshareall', '.uriel unit purge', '.uriel event stopall') still work, so you can undo what " +
+            "Uriel did. Takes effect at the next server start.");
+
+        KillSwitch_RestoreVanillaOnBoot = config.Bind(
+            "KillSwitch", "RestoreVanillaOnBoot", false,
+            "Emergency reset for a server you can't get into. When true, the next server start removes EVERY " +
+            "Uriel-spawned object, makes every shared chest and prison cell private again, and puts back every " +
+            "door an event held (Uriel's NPC units are always removed at start). Uriel then sets this back to " +
+            "false itself, so it runs once. Saved settings (unlocks, layouts, squads) are kept. Swapped stairs " +
+            "stay as they are: they are ordinary game stairs in another style. In-game, '.uriel killswitch' does " +
+            "the same without a restart.");
+
         StairSwap_Enabled = config.Bind(
             "StairSwap", "Enabled", true,
             "Allow players to hot-swap placed stairs to another cosmetic style of the same shape " +
@@ -250,6 +283,13 @@ internal static class Settings
             "Separate switch from chest sharing — prison cells are a different container type and are " +
             "governed independently. (Requires PublicStorage.Enabled as the master switch.)");
 
+        PublicStorage_CostsEnabled = config.Bind(
+            "PublicStorage", "CostsEnabled", true,
+            "Allow paid shares: '.uriel share cost <item> <amount>' and '.uriel paychest'. When false, no new " +
+            "price can be set and Uriel moves no payment items; a chest that already has a price stays CLOSED " +
+            "to others (it is never made free behind its owner's back) until the owner removes the price " +
+            "('.uriel share cost 0 0') or unshares it.");
+
         PublicStorage_MaxTargetDistance = config.Bind(
             "PublicStorage", "MaxTargetDistance", 5f,
             "How close (meters) your aim point must be to a container for '.uriel share'/'.uriel unshare' " +
@@ -260,6 +300,12 @@ internal static class Settings
             "EXPERIMENTAL. Allow admins to spawn NPC units into castle plots with '.uriel unit ...' " +
             "(the foundation for castle events). Spawned units are never saved: they are removed at the next " +
             "boot, by '.uriel unit purge', or by the game itself when their lifetime runs out.");
+
+        CastleEvents_DoorGates = config.Bind(
+            "CastleEvents", "DoorGates", true,
+            "Let castle events take over castle doors: a group bound to a door ('.uriel event door') keeps it " +
+            "shut and locked until its units are defeated. When false, no door can be bound and runs never " +
+            "touch a door (events still run, with every door left as the players set it).");
 
         CastleEvents_MaxUnitsPerCommand = config.Bind(
             "CastleEvents", "MaxUnitsPerCommand", 10,

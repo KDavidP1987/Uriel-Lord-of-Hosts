@@ -155,6 +155,8 @@ Full syntax and reply text: [`RAPHAEL_CASTLE_EVENTS_HANDOFF.md`](Uriel/Uriel/doc
 | `.uriel floor create\|assign\|list\|show\|delete …` | Floor templates: group → squads |
 | `.uriel template create\|floor\|options\|list\|show\|delete …` | Templates: floor → floor templates, default options |
 | `.uriel unit spawn\|list\|kill\|despawn\|clear\|purge …` (admin) | Unit tools and the server-wide kill switch |
+| `.uriel event stopall` (admin) | Stop every event on the server, doors put back |
+| `.uriel killswitch [confirm]` · `purgeall [confirm]` · `features` (admin) | Restore vanilla server-wide · remove every spawned object · show which features are on |
 | `.uriel unit status\|probe\|probemap\|rooms\|door …` (admin) | Diagnostics; details go to the server log |
 
 Run options: `easy|normal|hard|brutal`, `level=N`, `level±N`, `auto[+N]`, `hp*X`, `dmg*X`, `pp*X`,
@@ -164,17 +166,25 @@ Run options: `easy|normal|hard|brutal`, `level=N`, `level±N`, `auto[+N]`, `hp*X
 ## Configuration
 
 `BepInEx/config/kdpen.Uriel.cfg` — every feature has its own `Enabled` switch
-(changes take effect on server restart).
+(changes take effect on server restart). Every gate reads `Settings.<Feature>On`
+(master switch AND feature switch), so a switched-off feature is off for admins too.
+Cleanup paths (`.uriel killswitch`, `purgeall`, `purgeplot`, `purgeorphans`, `unshareall`,
+`unit purge|clear|despawn|kill|list`, `event stopall`) never read the switches, so an
+admin can always undo what Uriel did (`Services/KillSwitch.cs`).
 
 | Section | Key | Default | Effect |
 |---|---|---|---|
+| General | Enabled | `true` | Master switch: `false` turns every Uriel feature off for everyone, admins included. The cleanup commands still work |
+| KillSwitch | RestoreVanillaOnBoot | `false` | One-shot emergency reset: the next start removes every Uriel object and unit, makes every shared chest/cell private and puts event doors back, then sets itself back to `false` |
 | PublicStorage | Enabled | `true` | Master switch for chest sharing |
 | PublicStorage | PrisonEnabled | `true` | Independently allow prison-cell sharing |
+| PublicStorage | CostsEnabled | `true` | Allow paid shares; off = priced chests stay closed, no payments moved |
 | PublicStorage | MaxTargetDistance | `5` | Aim distance for `.uriel share` / `unshare` |
 | StairSwap | Enabled | `true` | Allow live stair restyling + `.uriel removestairs` |
 | StairSwap | MaxTargetDistance | `6` | Aim distance for the stair commands |
 | StairSwap | RespawnGapFrames | `5` | Frames between destroy & respawn when restyling a stair |
 | CastleEvents | Enabled | `false` | Master switch for Castle Events and the unit commands (alpha) |
+| CastleEvents | DoorGates | `true` | Events may shut and lock castle doors |
 | CastleEvents | PlayerEvents | `false` | Castle owners may run events on their own plot |
 | CastleEvents | DefaultContain | `storey` | Containment for a marker that doesn't name one |
 | CastleEvents | MaxMarkersPerPlot | `40` | Marker cap for players (admins unlimited) |

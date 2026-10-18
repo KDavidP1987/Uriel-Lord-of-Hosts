@@ -23,7 +23,7 @@ internal static class ApiCommands
     static bool Ready(ChatCommandContext ctx)
     {
         if (!Core.IsReady) { ctx.Reply("[URIEL:err] code=notready"); return false; }
-        if (!Settings.ObjectSpawn_Enabled.Value) { ctx.Reply("[URIEL:err] code=disabled"); return false; }
+        if (!Settings.ObjectSpawnOn) { ctx.Reply("[URIEL:err] code=disabled"); return false; }
         return true;
     }
 

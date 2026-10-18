@@ -23,6 +23,13 @@ before 1.0.
 unstable, you can **turn just that part off** in the config (each feature has its
 own `Enabled` switch) and keep using the rest — you never have to disable Uriel
 wholesale. See the per-section notes below and the **Configuration** table.
+The switches bind admins too: a feature that's off is off for everyone.
+
+**Want to play it safe?** Set `ObjectSpawn.Enabled=false` (no spawned objects) and
+leave `CastleEvents.Enabled=false` (the default: no NPC units). If something ever goes
+wrong, **`.uriel killswitch`** (then `.uriel killswitch confirm`) removes everything Uriel
+put in the world, and `General.Enabled=false` switches the whole mod off. See
+**Emergency: restore vanilla** below.
 
 **Found a bug or have an idea?** The fastest way to get a fix into the next
 release is the **[The Shadow Realm Discord](https://discord.gg/usC9QgBrXK)** —
@@ -244,6 +251,27 @@ floor, or a leash radius instead.
 - **Kill switch:** `.uriel unit purge` (then `.uriel unit purge confirm`) removes every Uriel
   unit on the server.
 
+## Emergency: restore vanilla
+
+Every admin cleanup below works even with the feature, or the whole mod, switched off.
+
+| Command | What it undoes |
+|---|---|
+| `.uriel killswitch [confirm]` | **Everything at once:** stops every castle event (doors put back as they were), removes every Uriel unit and every Uriel-spawned object, and makes every shared chest and prison cell private |
+| `.uriel purgeall [confirm]` | Every Uriel-spawned object on the server |
+| `.uriel unit purge [confirm]` | Every Uriel NPC unit on the server |
+| `.uriel event stopall` | Every running castle event, doors put back |
+| `.uriel unshareall` | Every shared chest and prison cell back to private |
+| `.uriel features` | Shows which features are on |
+
+Can't get into the server? Set `KillSwitch.RestoreVanillaOnBoot=true` in the config and
+restart: Uriel does the same reset at start, then switches the setting back off. To keep
+Uriel off afterwards, set `General.Enabled=false`.
+
+Only Uriel's own objects and units are ever removed; native objects are never touched.
+Saved settings (unlocks, event layouts, squads) are kept. Swapped stairs stay as they are:
+a swap leaves an ordinary game staircase in another style.
+
 ## Installation
 
 Uriel is a **server-side** mod — install it on your **V Rising dedicated
@@ -400,6 +428,7 @@ Admins on any plot; castle owners on their own plot when `CastleEvents.PlayerEve
 |---|---|
 | `.uriel event start [template\|-] [options]` | Start a run (a template, floor template or squad name; `-` = each group's own squad) |
 | `.uriel event status` · `stop` · `history` | Progress · end the run and restore doors · recent runs and best times |
+| `.uriel event stopall` | Admin: stop every event on the server, doors put back |
 
 **Library** (an admin's entries are server-wide, a player's are their own):
 
@@ -435,6 +464,8 @@ Config changes take effect on server restart.
 
 | Section | Key | Default | Effect |
 |---|---|---|---|
+| General | Enabled | `true` | Master switch: `false` turns every Uriel feature off for everyone, admins included. The cleanup commands still work |
+| KillSwitch | RestoreVanillaOnBoot | `false` | One-shot emergency reset: the next start removes every Uriel object and unit, makes every shared chest/cell private and puts event doors back, then sets itself back to `false` |
 | ObjectSpawn | Enabled | `true` | Master switch for object spawning |
 | ObjectSpawn | AdminOnly | `true` | When true, only admins may spawn — set `false` to open the player collection path |
 | ObjectSpawn | PlayerAccessMode | `Discovery` | `Discovery` (unlock by destroying) or `Full` (whole catalog) |
@@ -452,11 +483,13 @@ Config changes take effect on server restart.
 | ObjectSpawn | *(more)* | — | CollectionEnabled, BossUnlocksEnabled, DiscoveryNotify, RefundOnRemove, PurgeOrphansOnBoot — see the generated `.cfg`. Per-object/global player limits live in `object_conditions.json` (`.uriel objcfg`) |
 | PublicStorage | Enabled | `true` | Master switch for chest sharing |
 | PublicStorage | PrisonEnabled | `true` | Independently allow prison-cell sharing |
+| PublicStorage | CostsEnabled | `true` | Allow paid shares (`cost` modifier, `.uriel paychest`). Off: no new prices, no payments moved, and an already-priced chest stays closed to others (never made free) until its owner removes the price |
 | PublicStorage | MaxTargetDistance | `5` | Aim distance for `.uriel share` / `unshare` targeting |
 | StairSwap | Enabled | `true` | Allow live stair restyling + `.uriel removestairs` |
 | StairSwap | MaxTargetDistance | `6` | Aim distance for the stair commands |
 | StairSwap | RespawnGapFrames | `5` | Frames between destroy & respawn when restyling a stair |
 | CastleEvents | Enabled | `false` | Master switch for Castle Events and the unit commands (alpha) |
+| CastleEvents | DoorGates | `true` | Let events shut and lock castle doors. Off: doors can't be bound and runs never touch a door |
 | CastleEvents | PlayerEvents | `false` | Let castle owners run events on their own plot (admins always can, anywhere) |
 | CastleEvents | DefaultContain | `storey` | Where a marker's units stay when it doesn't say: `plot`, `room`, `storey`, a leash in metres, or a mix like `room,15` |
 | CastleEvents | MaxMarkersPerPlot | `40` | Most spawn markers a player's castle may have |

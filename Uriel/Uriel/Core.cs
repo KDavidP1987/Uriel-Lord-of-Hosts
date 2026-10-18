@@ -104,6 +104,9 @@ internal static class Core
             // in the registry — re-assert the neutral team on registered containers.
             try { PublicStorage.ReapplyAll(); }
             catch (System.Exception ex) { Log.LogWarning($"[Uriel SHARE] re-apply failed: {ex}"); }
+            // [KillSwitch] RestoreVanillaOnBoot: a one-shot restore for a server an admin can't get into.
+            try { KillSwitch.RunOnBootIfRequested(); }
+            catch (System.Exception ex) { Log.LogWarning($"[Uriel KILLSWITCH] boot restore failed: {ex}"); }
 
             IsReady = true;
             Log.LogInfo($"Uriel initialized via {trigger} (attempt #{_initAttempts}). Prefab map has {prefabSystem.SpawnableNameToPrefabGuidDictionary.Count} entries.");

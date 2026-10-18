@@ -84,6 +84,12 @@ internal static class HelpCommands
                     "  .uriel stairpurge | stairrefresh (experimental)\n" +
                     "  .uriel unit spawn|list|kill|despawn|clear|purge - castle event units\n" +
                     "  .uriel api version|catalog|unlocked - machine API for Raphael");
+                ctx.Reply(
+                    "ADMIN - restore vanilla (work with features switched off):\n" +
+                    "  .uriel features - which features are on\n" +
+                    "  .uriel killswitch [confirm] - undo everything: events, units, objects, shares\n" +
+                    "  .uriel purgeall [confirm] - every spawned object;  .uriel event stopall\n" +
+                    "  Config: General.Enabled=false turns Uriel off; KillSwitch.RestoreVanillaOnBoot resets at start");
                 break;
 
             default:

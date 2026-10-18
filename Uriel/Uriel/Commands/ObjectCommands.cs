@@ -17,7 +17,7 @@ internal static class ObjectCommands
     static bool Ready(ChatCommandContext ctx)
     {
         if (!Core.IsReady) { ctx.Reply("Uriel is not yet initialized."); return false; }
-        if (!Settings.ObjectSpawn_Enabled.Value)
+        if (!Settings.ObjectSpawnOn)
         {
             ctx.Reply("Object spawning is disabled by the server admin (ObjectSpawn.Enabled).");
             return false;
@@ -27,6 +27,14 @@ internal static class ObjectCommands
             ctx.Reply("Object spawning is admin-only on this server (ObjectSpawn.AdminOnly).");
             return false;
         }
+        return true;
+    }
+
+    /// <summary>Admin cleanup commands only need Uriel up: they work with object spawning switched off, so an admin
+    /// can always remove what was spawned.</summary>
+    static bool CleanupReady(ChatCommandContext ctx)
+    {
+        if (!Core.IsReady || Core.ObjectSpawn is null) { ctx.Reply("Uriel is not yet initialized."); return false; }
         return true;
     }
 
@@ -126,7 +134,7 @@ internal static class ObjectCommands
     [Command("purgeplot", description: "Remove Uriel's objects on the castle plot you're standing in (live spawns + tracked records). Native objects are never touched. For one specific untracked object, aim at it and use '.uriel forcedespawn'. Usage: .uriel purgeplot", adminOnly: true)]
     public static void PurgePlot(ChatCommandContext ctx)
     {
-        if (!Ready(ctx)) return;
+        if (!CleanupReady(ctx)) return;
         Core.ObjectSpawn.PurgePlot(ctx.Event.SenderCharacterEntity, out string message);
         ctx.Reply(message);
     }
@@ -141,7 +149,7 @@ internal static class ObjectCommands
     [Command("forcedespawn", description: "Admin: force-remove the object you're aiming at, IGNORING Uriel ownership/records (recovers untracked objects, e.g. from older builds). Run once to arm (names it), then '.uriel forcedespawn confirm' within 30s. Usage: .uriel forcedespawn [confirm]", adminOnly: true)]
     public static void ForceDespawn(ChatCommandContext ctx, string confirm = null)
     {
-        if (!Ready(ctx)) return;
+        if (!CleanupReady(ctx)) return;
         bool isConfirm = "confirm".Equals(confirm?.Trim(), StringComparison.OrdinalIgnoreCase);
         Core.ObjectSpawn.ForceDespawn(ctx.Event.SenderCharacterEntity, isConfirm, out string message);
         ctx.Reply(message);
@@ -150,7 +158,7 @@ internal static class ObjectCommands
     [Command("forcepurgeplot", description: "Same as '.uriel purgeplot' — removes Uriel's objects on the plot (live spawns + records); native objects/plants/trees/build pieces are never touched. (Kept as a synonym; the old chain sweep was removed because it could delete native resources.) Usage: .uriel forcepurgeplot", adminOnly: true)]
     public static void ForcePurgePlot(ChatCommandContext ctx)
     {
-        if (!Ready(ctx)) return;
+        if (!CleanupReady(ctx)) return;
         Core.ObjectSpawn.ForcePurgePlot(ctx.Event.SenderCharacterEntity, out string message);
         ctx.Reply(message);
     }
@@ -158,7 +166,7 @@ internal static class ObjectCommands
     [Command("purgeorphans", description: "Admin: scan the WHOLE map and remove orphaned Uriel objects — ones whose castle heart is gone (castle destroyed/decayed) or that sit where no living heart governs them. Only Uriel's own objects are touched; native objects are never affected. Server-wide on-demand backup for the automatic boot-time cleanup. Usage: .uriel purgeorphans", adminOnly: true)]
     public static void PurgeOrphans(ChatCommandContext ctx)
     {
-        if (!Ready(ctx)) return;
+        if (!CleanupReady(ctx)) return;
         Core.ObjectSpawn.PurgeOrphans(ctx.Event.SenderCharacterEntity, out string message);
         ctx.Reply(message);
     }

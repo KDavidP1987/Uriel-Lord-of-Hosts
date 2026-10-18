@@ -49,6 +49,23 @@ the prisoner is still `Imprisoned` after ~20 frames): strip `ImprisonedBuff`
 re-owned to the taker. Validation question for live test: which layer fires
 (log says), and does the charmed prisoner follow the taker properly.
 
+## Switches and kill switch (v0.22.0, 2026-10-18)
+
+Every gate reads `Settings.<Feature>On` = `[General] Enabled` AND the feature's own switch, so a
+switched-off feature is off for admins too. Admin cleanup never reads the switches. Server-wide reset:
+`.uriel killswitch [confirm]` or `[KillSwitch] RestoreVanillaOnBoot=true` (one shot at the next start,
+then it sets itself back to false); both run `Services/KillSwitch.cs`.
+
+- `PublicStorage.Enabled=false` (or `PrisonEnabled=false` for cells): shares stay in the registry, so
+  switching back on restores them, but at boot each switched-off entry whose container still looks
+  public (castle link severed) is made private with the normal unshare path. This makes "off" vanilla
+  whatever the save kept, without relying on the save reverting a rebuilt chest. Log:
+  `[Uriel SHARE] switched off in config: <n> share(s) NOT applied, <m> container(s) found still public and made private.`
+- `PublicStorage.CostsEnabled=false`: `share cost <id> <n>` (non-zero) and `paychest` are refused, and
+  Uriel moves no payment items. A container that already has a price is never made free behind its
+  owner's back: withdrawals by others are denied until the owner sets `cost 0 0` or unshares.
+- Kill switch: `UnshareAll` (every entry restored to private, registry cleared).
+
 ## Live validation results (v0.2.1, 2026-06-06)
 
 Two-player test confirmed the team-swap mechanism: a non-clan player got the

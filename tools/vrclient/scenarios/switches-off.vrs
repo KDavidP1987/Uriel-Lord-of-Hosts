@@ -1,0 +1,42 @@
+# switches-off.vrs: feature switches bind admins, and cleanup still works with the feature off.
+# Needs config: ObjectSpawn.Enabled=false, CastleEvents.DoorGates=false, PublicStorage.CostsEnabled=false (everything
+# else on), and at least one Uriel object on plot 11 (spawned before the restart, e.g. by switches-setup.vrs).
+# Plot 11 layout gate1/gate2 (both bound to doors) + template evtest (castle-event.vrs).
+ensure
+console TPHome
+wait 3
+mark
+chat .uriel features
+expect-reply Object spawning OFF.
+expect-seen \[CHAT> ${CHARACTER}\] Uriel features:.*event doors OFF\. Public chests on, prison cells on, paid shares OFF\.
+# object spawning is off for an admin too, and for the Raphael api
+chat .devtp -2030 -1717 5
+wait 3
+chat .uriel spawn TM_Glassblower_Crate01 here
+expect-reply Object spawning is disabled by the server admin (ObjectSpawn.Enabled).
+chat .uriel api version
+expect-reply [URIEL:err] code=disabled
+# doors: binding and the door tool are refused; a run leaves every door alone
+chat .devtp -2030 -1713 5
+wait 2
+chat .uriel event door gate1
+expect-reply Event doors are disabled by the server admin (CastleEvents.DoorGates).
+chat .uriel unit door show
+expect-reply Event doors are disabled by the server admin (CastleEvents.DoorGates).
+chat .devtp -2014 -1705 5
+wait 3
+chat .uriel event start evtest
+expect-log \[Uriel EVENT\] started territory=11 template=evtest groups=2 units=3 bosses=1 doors=0 failedMarkers=0
+expect-no-log \[Uriel EVENT\] door-held
+chat .uriel event stop
+expect-log \[Uriel EVENT\] stopped territory=11 units=3 doorsRestored=0
+wait 4
+# cleanup works with object spawning off
+chat .devtp -2030 -1717 5
+wait 3
+chat .uriel purgeplot
+expect-reply Uriel-spawned object(s) from this plot. Native objects were left untouched.
+expect-log \[Uriel SPAWN\] purged [1-9]\d* object\(s\) \(\d+ marker \+ \d+ record\) from territory 11
+chat .uriel unit list
+expect-reply No Uriel units
+console TPHome

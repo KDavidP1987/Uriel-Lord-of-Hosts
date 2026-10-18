@@ -13,11 +13,18 @@ internal static class UnitCommands
     static bool Ready(ChatCommandContext ctx)
     {
         if (!Core.IsReady || Core.Units is null) { ctx.Reply("Uriel is not yet initialized."); return false; }
-        if (!Settings.CastleEvents_Enabled.Value)
+        if (!Settings.CastleEventsOn)
         {
             ctx.Reply("Castle events are disabled by the server admin (CastleEvents.Enabled).");
             return false;
         }
+        return true;
+    }
+
+    /// <summary>Counting and removing units works with castle events switched off, so leftovers can always be cleared.</summary>
+    static bool CleanupReady(ChatCommandContext ctx)
+    {
+        if (!Core.IsReady || Core.Units is null) { ctx.Reply("Uriel is not yet initialized."); return false; }
         return true;
     }
 
@@ -33,28 +40,28 @@ internal static class UnitCommands
     [Command("list", description: "Count the Uriel units on the server, per plot. Usage: .uriel unit list", adminOnly: true)]
     public static void List(ChatCommandContext ctx)
     {
-        if (!Ready(ctx)) return;
+        if (!CleanupReady(ctx)) return;
         ctx.Reply(Core.Units.List(ctx.Event.SenderCharacterEntity));
     }
 
     [Command("kill", description: "Kill the Uriel units within the radius (default 15 m): all, boss or mob. A real death (event groups clear, doors open), unlike despawn. Only Uriel's own units. Usage: .uriel unit kill [radius] [all|boss|mob]", adminOnly: true)]
     public static void Kill(ChatCommandContext ctx, float radius = 15f, string which = "all")
     {
-        if (!Ready(ctx)) return;
+        if (!CleanupReady(ctx)) return;
         ctx.Reply(Core.Units.KillNear(ctx.Event.SenderCharacterEntity, radius, which));
     }
 
     [Command("despawn", description: "Remove the nearest Uriel unit within the radius (default 10 m). Usage: .uriel unit despawn [radius]", adminOnly: true)]
     public static void Despawn(ChatCommandContext ctx, float radius = 10f)
     {
-        if (!Ready(ctx)) return;
+        if (!CleanupReady(ctx)) return;
         ctx.Reply(Core.Units.DespawnNearest(ctx.Event.SenderCharacterEntity, radius));
     }
 
     [Command("clear", description: "Remove every Uriel unit on the castle plot you're standing in. Usage: .uriel unit clear", adminOnly: true)]
     public static void Clear(ChatCommandContext ctx)
     {
-        if (!Ready(ctx)) return;
+        if (!CleanupReady(ctx)) return;
         ctx.Reply(Core.Units.ClearPlot(ctx.Event.SenderCharacterEntity));
     }
 
@@ -91,6 +98,7 @@ internal static class UnitCommands
     public static void Door(ChatCommandContext ctx, string action = "show")
     {
         if (!Ready(ctx)) return;
+        if (!Settings.DoorGatesOn) { ctx.Reply("Event doors are disabled by the server admin (CastleEvents.DoorGates)."); return; }
         var character = ctx.Event.SenderCharacterEntity;
         if (!character.TryGetComponent<Unity.Transforms.Translation>(out var me)) { ctx.Reply("Can't read your position."); return; }
         if (!Core.ObjectSpawn.TryResolvePlot(me.Value, out var heart, out _)) { ctx.Reply("You're not standing in a castle plot."); return; }
